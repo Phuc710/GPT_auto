@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto Fill GPT</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <div class="app">
+
+    <!-- MAIN SCREEN -->
+    <div id="mainScreen" class="screen">
+      <header class="header">
+        <div class="brand">
+          <div class="logo-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+            </svg>
+          </div>
+          <div>
+            <h1>Auto Fill <span class="pro">PRO</span></h1>
+            <p class="sub">Payment Form Auto Filler</p>
+          </div>
+        </div>
+        <button class="icon-btn" id="settingsBtn" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+          </svg>
+        </button>
+      </header>
+
+      <div class="status-bar">
+        <div class="status-dot">
+          <span class="dot pulse"></span>
+          <span id="pageStatus">Scanning page...</span>
+        </div>
+        <span id="pageUrl" class="url-label"></span>
+      </div>
+
+      <div class="card-form">
+        <div class="section-label">Card Setup</div>
+
+        <div class="card-type-row">
+          <button class="type-btn" data-type="VISA">VISA</button>
+          <button class="type-btn" data-type="MASTERCARD">MASTER</button>
+          <button class="type-btn" data-type="UNIONPAY">UNION</button>
+        </div>
+
+        <div class="field">
+          <label>BIN (Bank Identification Number)</label>
+          <div class="bin-wrapper">
+            <input type="text" id="binInput" placeholder="e.g. 400000" maxlength="16" inputmode="numeric">
+            <span id="binTypeBadge" class="type-badge">AUTO</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Month <span class="hint">blank = random</span></label>
+            <input type="text" id="monthInput" placeholder="MM" maxlength="2" inputmode="numeric">
+          </div>
+          <div class="field">
+            <label>Year <span class="hint">blank = random</span></label>
+            <input type="text" id="yearInput" placeholder="YYYY" maxlength="4" inputmode="numeric">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>CVV <span class="hint">blank = random</span></label>
+          <input type="text" id="cvvInput" placeholder="xxx" maxlength="4" inputmode="numeric">
+        </div>
+
+        <button id="fillBtn" class="fill-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          Fill Checkout Form
+        </button>
+      </div>
+
+      <!-- Step Log -->
+      <div class="log-panel">
+        <div class="log-header">
+          <span>Fill Log</span>
+          <button id="clearLogBtn" class="clear-log-btn">Clear</button>
+        </div>
+        <div id="logContainer" class="log-body">
+          <div class="log-empty">Waiting for fill action...</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- SETTINGS SCREEN -->
+    <div id="settingsScreen" class="screen" style="display:none;">
+      <header class="header">
+        <button class="icon-btn" id="backBtn" title="Back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="brand">
+          <h1>Settings</h1>
+        </div>
+        <div style="width:36px;"></div>
+      </header>
+
+      <div class="settings-body">
+        <div class="setting-group">
+          <div class="setting-label">Default BIN</div>
+          <input type="text" id="defaultBin" placeholder="Leave empty for manual entry" maxlength="16">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Card Type Override</div>
+          <select id="defaultCardType">
+            <option value="">Auto Detect</option>
+            <option value="VISA">Visa</option>
+            <option value="MASTERCARD">Mastercard</option>
+            <option value="AMEX">American Express</option>
+            <option value="DISCOVER">Discover</option>
+            <option value="UNIONPAY">UnionPay</option>
+            <option value="JCB">JCB</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Fill Delay (ms)</div>
+          <input type="number" id="fillDelay" value="100" min="0" max="2000">
+          <div class="setting-hint">Delay between each field fill. Increase if site needs time to react.</div>
+        </div>
+
+        <button id="saveSettingsBtn" class="fill-btn">Save Settings</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="cardGenerator.js"></script>
+  <script src="popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Fill GPT - Payment Form Filler",
+  "version": "1.0.0",
+  "description": "Auto-fill payment forms with BIN-based card generator and random addresses (US & Korea)",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://pay.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["cardGenerator.js", "dataGenerator.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
