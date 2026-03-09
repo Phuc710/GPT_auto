@@ -1,8 +1,9 @@
 # gpt_selenium.py - Selenium automation for ChatGPT registration
 
-import time
-import sys
 import random
+import shutil
+import time
+from pathlib import Path
 from typing import Optional
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -11,7 +12,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 
 from config import PROXY, USER_AGENT, WAIT_TIME, DEFAULT_PASSWORD, USE_ANTI_DETECT, RANDOM_DELAYS, MIN_DELAY_MS, MAX_DELAY_MS
-from anti_detect import get_random_user_agent, random_delay, random_scroll
+from anti_detect import (
+    apply_anti_fingerprint,
+    build_fingerprint,
+    clear_browser_state,
+    random_delay,
+    random_scroll,
+)
 from step_tracker import Logger  # Shared logger with colored output
 
 
@@ -193,6 +200,8 @@ class DriverManager:
     
     _port_counter = 9500  # Starting port for multiple browsers
     _port_lock = None  # Will be initialized in create_driver
+    _profile_root = Path(__file__).resolve().parent / ".browser_profiles"
+    _profile_root_prepared = False
     
     @staticmethod
     def _get_next_port():
@@ -207,30 +216,91 @@ class DriverManager:
             if DriverManager._port_counter > 9600:
                 DriverManager._port_counter = 9500
             return port
+
+    @staticmethod
+    def _prepare_profile_root():
+        import threading
+
+        if DriverManager._port_lock is None:
+            DriverManager._port_lock = threading.Lock()
+
+        with DriverManager._port_lock:
+            DriverManager._profile_root.mkdir(parents=True, exist_ok=True)
+            if DriverManager._profile_root_prepared:
+                return
+
+            for child in DriverManager._profile_root.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+
+            DriverManager._profile_root_prepared = True
+
+    @staticmethod
+    def _build_profile_dir(thread_id: int, port: int) -> Path:
+        DriverManager._prepare_profile_root()
+        profile_dir = DriverManager._profile_root / f"thread_{thread_id}_port_{port}"
+        if profile_dir.exists():
+            shutil.rmtree(profile_dir, ignore_errors=True)
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        return profile_dir
+
+    @staticmethod
+    def cleanup_profile_dir(profile_dir: Optional[str | Path]) -> None:
+        if not profile_dir:
+            return
+
+        try:
+            shutil.rmtree(Path(profile_dir), ignore_errors=True)
+        except Exception:
+            pass
     
     @staticmethod
     def create_driver(thread_id: int = 0):
         """Initialize undetected Chrome driver with anti-detection and unique port"""
         options = uc.ChromeOptions()
-        
-        # Use random User-Agent if anti-detect enabled
-        if USE_ANTI_DETECT:
-            user_agent = get_random_user_agent()
-            Logger.info(f"Using random User-Agent")
-        else:
-            user_agent = USER_AGENT
-        
-        options.add_argument(f"user-agent={user_agent}")
+
+        fingerprint = build_fingerprint(USER_AGENT if not USE_ANTI_DETECT else None)
+        port = DriverManager._get_next_port() + thread_id
+        profile_dir = DriverManager._build_profile_dir(thread_id, port)
+
+        options.add_argument(f"user-agent={fingerprint.user_agent}")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--window-size=1280,800")
-        
-        # Use unique port and user data dir for each thread to avoid conflicts
-        port = DriverManager._get_next_port() + thread_id
-        user_data_dir = f"C:\\Users\\Phucc\\AppData\\Local\\Google\\Chrome\\User Data\\Profile_{port}"
-        options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument(f"--window-size={fingerprint.window_size_argument}")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-breakpad")
+        options.add_argument("--disable-component-update")
+        options.add_argument("--disable-default-apps")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-features=Translate,OptimizationHints,IsolateOrigins,site-per-process")
+        options.add_argument("--disable-popup-blocking")
+        options.add_argument("--disable-renderer-backgrounding")
+        options.add_argument("--disable-sync")
+        options.add_argument("--metrics-recording-only")
+        options.add_argument("--mute-audio")
+        options.add_argument("--no-first-run")
+        options.add_argument("--password-store=basic")
+        options.add_argument("--use-mock-keychain")
+        options.add_argument("--disk-cache-size=1")
+        options.add_argument("--media-cache-size=1")
+
+        options.add_argument(f"--user-data-dir={profile_dir}")
         options.add_argument(f"--remote-debugging-port={port}")
+        options.add_experimental_option(
+            "prefs",
+            {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "profile.default_content_setting_values.notifications": 2,
+                "profile.default_content_setting_values.geolocation": 2,
+                "intl.accept_languages": fingerprint.language_header,
+            },
+        )
         
         if PROXY:
             options.add_argument(f'--proxy-server={PROXY}')
@@ -244,8 +314,17 @@ class DriverManager:
                 driver = uc.Chrome(options=options, headless=False)
             except Exception as e2:
                 Logger.error(f"Cannot start browser: {e2}")
+                DriverManager.cleanup_profile_dir(profile_dir)
                 return None
-        
+
+        driver._profile_dir = str(profile_dir)
+        driver._fingerprint = fingerprint
+
+        if USE_ANTI_DETECT:
+            apply_anti_fingerprint(driver, fingerprint)
+            Logger.info(f"Session fingerprint ready | {fingerprint.platform} | {fingerprint.screen_width}x{fingerprint.screen_height}")
+
+        clear_browser_state(driver)
         return driver
 
 
@@ -261,6 +340,7 @@ class GPTRegistration:
         self.page_detector = PageDetector()
         self.timing = TimingManager()
         self.thread_id = 0
+        self.profile_dir = None
     
     def start(self, thread_id: int = 0) -> bool:
         """Start browser"""
@@ -270,6 +350,7 @@ class GPTRegistration:
             self.driver = DriverManager.create_driver(thread_id=thread_id)
             if self.driver is None:
                 return False
+            self.profile_dir = getattr(self.driver, "_profile_dir", None)
             Logger.success("Browser ready")
             return True
         except Exception as e:
@@ -855,6 +936,10 @@ class GPTRegistration:
                 Logger.info("Browser closed")
         except Exception as e:
             Logger.warning(f"Error closing browser: {e}")
+        finally:
+            DriverManager.cleanup_profile_dir(self.profile_dir)
+            self.driver = None
+            self.profile_dir = None
 
 
 # ============ QUICK TEST ============
