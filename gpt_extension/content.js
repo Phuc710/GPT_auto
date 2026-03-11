@@ -62,10 +62,8 @@ async function fillTopFrame(cardData, delay, address) {
     await fillCardFields(cardData, fields, stepDelay);
   }
 
-  // Wait for Stripe iframe to finish filling card fields first
-  // Then fill address: Name → Address → City → State → Postal
+  // Fill address right after: Name → Address → City → State → Postal
   if (hasAddress) {
-    await sleep(1500);
     logStep('info', '🔍', 'Filling billing address...');
     await fillBillingAddress(address, stepDelay);
   }
