@@ -151,16 +151,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     logEntries = [];
     logContainer.innerHTML = '';
-    addLog('info', 'ℹ', `Network: ${card.type} ${card.emoji} | Luhn: ✓ valid`);
-    addLog('step', '→', `PAN: ${card.numberFormatted}`);
-    addLog('step', '→', `Expiry: ${card.expiry.formatted} | CVV: ${card.cvv}`);
     if (addr._isRandom) {
       addLog('info', '🎲', `Random address: ${addr.name} — ${addr.line1}, ${addr.city}`);
     }
-    addLog('info', '⏳', 'Sending to page...');
 
     setButtonsDisabled(true);
-
     triggerFill(card, addr);
   });
 
@@ -171,13 +166,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     logEntries = [];
     logContainer.innerHTML = '';
-    addLog('info', 'ℹ', `Network: ${card.type} ${card.emoji} | Luhn: ✓ valid`);
-    addLog('step', '→', `PAN: ${card.numberFormatted}`);
-    addLog('step', '→', `Expiry: ${card.expiry.formatted} | CVV: ${card.cvv}`);
-    addLog('info', '⏳', 'Sending to page...');
 
     setButtonsDisabled(true);
-
     triggerFill(card, {}); // empty address = card only
   });
 
