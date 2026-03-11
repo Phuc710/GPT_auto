@@ -1,7 +1,8 @@
-1. 👤 Name
+
 2. 💳 Card Number  
 3. 📅 Expiry
 4. 🔒 CVV
+👤 Name
 5. 🏠 Address Line 1 → Line 2 → City → State → Postal
 Vấn đề cốt lõi: Card fields (#payment-numberInput, #payment-expiryInput, #payment-cvcInput) nằm trong Stripe iframe (b.stripecdn.com) — đây là cross-origin, top frame KHÔNG THỂ truy cập được DOM của nó.
 

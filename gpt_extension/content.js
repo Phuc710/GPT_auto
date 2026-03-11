@@ -51,7 +51,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // ═════════════════════════════════════════════════════════════
 async function fillTopFrame(cardData, delay, address) {
   const stepDelay = Math.max(delay, 220);
-  const hasAddress = address && Object.values(address).some(v => v && v !== false);
+
+  // Check hasAddress — ignore internal _isRandom / _source keys
+  const addrValues = Object.entries(address || {})
+    .filter(([k]) => !k.startsWith('_'))
+    .map(([, v]) => v);
+  const hasAddress = addrValues.some(v => v && v !== false);
 
   // Also try to find card fields in own document (rare but possible)
   const fields = scanPaymentFields();
@@ -64,8 +69,10 @@ async function fillTopFrame(cardData, delay, address) {
 
   // Fill address right after: Name → Address → City → State → Postal
   if (hasAddress) {
-    logStep('info', '🔍', 'Filling billing address...');
+    logStep('info', '🔍', `Filling billing address (name=${address.name}, city=${address.city})...`);
     await fillBillingAddress(address, stepDelay);
+  } else {
+    logStep('info', '⏭', 'No address data — skipping address fill');
   }
 
   logStep('info', '✅', `Done — frame ${window.location.origin} finished`);
@@ -157,68 +164,120 @@ async function fillCardFields(cardData, fields, stepDelay) {
 async function fillBillingAddress(address, delay) {
   logStep('step', '🏠', 'Filling billing address...');
 
-  // Name
-  const nameField = findField([
+  // ── Name ──
+  const nameSelectors = [
+    // ChatGPT / Stripe billing form
     '#billingAddress-nameInput',
-    'input[name="name"][autocomplete*="name"]',
-    'input[name="billingName" i]',
+    'input[data-testid="billing-name"]',
+    'input[name="billingName"]',
+    'input[name="billing_name"]',
+    'input[name="name_on_card"]',
+    'input[name="nameOnCard"]',
+    'input[name="cardholder"]',
+    'input[name="cardholder_name"]',
+    'input[name="cardholderName"]',
+    // Generic
+    'input[autocomplete="cc-name"]',
+    'input[autocomplete="billing name"]',
+    'input[autocomplete="name"]',
+    'input[name="name"]',
+    'input[id*="name" i][type="text"]',
     'input[placeholder*="full name" i]',
-    'input[placeholder*="name" i]'
-  ], ['full name', 'name', 'billing name', 'name on card']);
+    'input[placeholder*="cardholder" i]',
+    'input[placeholder*="name on card" i]',
+    'input[placeholder*="card holder" i]',
+    'input[placeholder*="name" i]',
+    'input[aria-label*="name" i]',
+  ];
+  const nameField = await waitForField(nameSelectors, ['full name', 'name on card', 'cardholder', 'billing name', 'name'], delay);
   if (nameField && address.name) {
+    logStep('step', '👤', `Name field found (${fieldDesc(nameField)})`);
     await sleep(delay);
     await fillField(nameField, address.name, delay);
     logStep('success', '✓', `Name: ${address.name}`);
+  } else if (address.name) {
+    logStep('warn', '⚠', 'Name field NOT found — skipping');
   }
 
-  // Address Line 1
-  const addr1Field = findField([
+  // ── Address Line 1 ──
+  const addr1Field = await waitForField([
     '#billingAddress-addressLine1Input',
-    'input[name="addressLine1" i]',
-    'input[name="address1" i]',
     'input[autocomplete="billing street-address"]',
+    'input[autocomplete="address-line1"]',
+    'input[name="addressLine1"]',
+    'input[name="address_line_1"]',
+    'input[name="address1"]',
+    'input[name="street"]',
+    'input[name="street_address"]',
+    'input[id*="address" i][id*="1"]',
     'input[placeholder*="address line 1" i]',
-    'input[placeholder*="address" i]'
-  ], ['address line 1', 'address 1', 'street address', 'address']);
+    'input[placeholder*="street address" i]',
+    'input[placeholder*="address" i]',
+    'input[aria-label*="address line 1" i]',
+  ], ['address line 1', 'address 1', 'street address', 'street'], delay);
   if (addr1Field && address.line1) {
+    logStep('step', '🏠', `Address field found (${fieldDesc(addr1Field)})`);
     await sleep(delay);
     await fillField(addr1Field, address.line1, delay);
     logStep('success', '✓', `Address: ${address.line1}`);
+  } else if (address.line1) {
+    logStep('warn', '⚠', 'Address Line 1 field NOT found — skipping');
   }
 
-  // Address Line 2
+  // ── Address Line 2 ──
   const addr2Field = findField([
     '#billingAddress-addressLine2Input',
-    'input[name="addressLine2" i]',
-    'input[autocomplete="billing address-line2"]'
+    'input[autocomplete="address-line2"]',
+    'input[autocomplete="billing address-line2"]',
+    'input[name="addressLine2"]',
+    'input[name="address_line_2"]',
+    'input[name="address2"]',
+    'input[placeholder*="address line 2" i]',
+    'input[placeholder*="apt" i]',
+    'input[placeholder*="suite" i]',
+    'input[aria-label*="address line 2" i]',
   ], ['address line 2', 'address 2', 'apt', 'suite', 'unit']);
   if (addr2Field && address.line2) {
     await sleep(delay);
     await fillField(addr2Field, address.line2, delay);
+    logStep('success', '✓', `Address 2: ${address.line2}`);
   }
 
-  // City
-  const cityField = findField([
+  // ── City ──
+  const cityField = await waitForField([
     '#billingAddress-localityInput',
-    'input[name="city" i]',
     'input[autocomplete="billing locality"]',
-    '#city'
-  ], ['city', 'town', 'locality']);
+    'input[autocomplete="address-level2"]',
+    'input[name="city"]',
+    'input[name="locality"]',
+    'input[id*="city" i]',
+    'input[placeholder*="city" i]',
+    'input[aria-label*="city" i]',
+    '#city',
+  ], ['city', 'town', 'locality'], delay);
   if (cityField && address.city) {
     await sleep(delay);
     await fillField(cityField, address.city, delay);
     logStep('success', '✓', `City: ${address.city}`);
+  } else if (address.city) {
+    logStep('warn', '⚠', 'City field NOT found — skipping');
   }
 
-  // State / Province (select dropdown)
+  // ── State / Province ──
   const stateField = findField([
     '#billingAddress-administrativeAreaInput',
-    'select[name="administrativeArea" i]',
-    'select[name="state" i]',
-    'input[name="state" i]',
-    'input[autocomplete="billing address-level1"]',
-    '#state'
-  ], ['state', 'province', 'region', 'do si']);
+    'select[autocomplete="billing address-level1"]',
+    'select[autocomplete="address-level1"]',
+    'select[name="administrativeArea"]',
+    'select[name="state"]',
+    'select[name="province"]',
+    'select[id*="state" i]',
+    'input[autocomplete="address-level1"]',
+    'input[name="state"]',
+    'input[name="province"]',
+    'input[id*="state" i]',
+    '#state',
+  ], ['state', 'province', 'region']);
   if (stateField && address.state) {
     await sleep(delay);
     if (stateField.tagName === 'SELECT') {
@@ -230,25 +289,40 @@ async function fillBillingAddress(address, delay) {
       if (match) {
         await fillField(stateField, match.value, delay);
         logStep('success', '✓', `State: ${address.state}`);
+      } else {
+        logStep('warn', '⚠', `State "${address.state}" not found in dropdown`);
       }
     } else {
       await fillField(stateField, address.state, delay);
       logStep('success', '✓', `State: ${address.state}`);
     }
+  } else if (address.state) {
+    logStep('warn', '⚠', 'State field NOT found — skipping');
   }
 
-  // Postal Code
-  const postalField = findField([
+  // ── Postal Code ──
+  const postalField = await waitForField([
     '#billingAddress-postalCodeInput',
-    'input[name="postalCode" i]',
-    'input[name="zip" i]',
     'input[autocomplete="billing postal-code"]',
-    '#postal'
-  ], ['postal code', 'zip code', 'zip', 'postal']);
+    'input[autocomplete="postal-code"]',
+    'input[name="postalCode"]',
+    'input[name="postal_code"]',
+    'input[name="zip"]',
+    'input[name="zipcode"]',
+    'input[id*="postal" i]',
+    'input[id*="zip" i]',
+    'input[placeholder*="postal" i]',
+    'input[placeholder*="zip" i]',
+    'input[aria-label*="postal" i]',
+    'input[aria-label*="zip" i]',
+    '#postal', '#zip',
+  ], ['postal code', 'zip code', 'zip', 'postal'], delay);
   if (postalField && address.postal) {
     await sleep(delay);
     await fillField(postalField, address.postal, delay);
     logStep('success', '✓', `Postal: ${address.postal}`);
+  } else if (address.postal) {
+    logStep('warn', '⚠', 'Postal field NOT found — skipping');
   }
 }
 
@@ -383,6 +457,24 @@ function scanPaymentFields() {
 // ═════════════════════════════════════════════════════════════
 // FIELD SEARCH — each frame searches ONLY its own document
 // ═════════════════════════════════════════════════════════════
+
+/**
+ * Like findField() but retries up to ~3 seconds for lazily-rendered fields.
+ * Useful for billing address fields that appear after card iframe loads.
+ */
+async function waitForField(selectors, labels = [], baseDelay = 220) {
+  const maxWait = 3000;
+  const interval = Math.max(200, Math.min(400, baseDelay));
+  const tries = Math.ceil(maxWait / interval);
+
+  for (let i = 0; i < tries; i++) {
+    const found = findField(selectors, labels);
+    if (found) return found;
+    if (i < tries - 1) await sleep(interval);
+  }
+  return null;
+}
+
 function findField(selectors, labels = []) {
   const doc = document;
 
