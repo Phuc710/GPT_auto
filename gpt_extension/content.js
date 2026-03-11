@@ -53,11 +53,6 @@ async function fillTopFrame(cardData, delay, address) {
   const stepDelay = Math.max(delay, 220);
   const hasAddress = address && Object.values(address).some(v => v && v !== false);
 
-  if (hasAddress) {
-    logStep('info', '🔍', 'Scanning page for billing fields...');
-    await fillBillingAddress(address, stepDelay);
-  }
-
   // Also try to find card fields in own document (rare but possible)
   const fields = scanPaymentFields();
   const anyCard = fields.cardNumberField || fields.combinedExpiryField ||
@@ -65,6 +60,14 @@ async function fillTopFrame(cardData, delay, address) {
 
   if (anyCard) {
     await fillCardFields(cardData, fields, stepDelay);
+  }
+
+  // Wait for Stripe iframe to finish filling card fields first
+  // Then fill address: Name → Address → City → State → Postal
+  if (hasAddress) {
+    await sleep(1500);
+    logStep('info', '🔍', 'Filling billing address...');
+    await fillBillingAddress(address, stepDelay);
   }
 
   logStep('info', '✅', `Done — frame ${window.location.origin} finished`);
