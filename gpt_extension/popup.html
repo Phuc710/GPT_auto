@@ -22,19 +22,28 @@
             </svg>
           </div>
           <div>
-            <h1>Auto Fill <span class="pro">PRO</span></h1>
-            <p class="sub">Payment Form Auto Filler</p>
+            <h1>Auto Fill <span class="pro">GPT</span></h1>
+            <p class="sub">ChatGPT Payment Auto Filler</p>
           </div>
         </div>
-        <button class="icon-btn" id="settingsBtn" title="Settings">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3" />
-            <path
-              d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
-          </svg>
-        </button>
+        <div class="header-actions">
+          <button class="icon-btn" id="reloadTabBtn" title="Reload Page & Reset Mode">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+          </button>
+          <button class="icon-btn" id="settingsBtn" title="Settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </header>
 
+      <!-- Status Bar -->
       <div class="status-bar">
         <div class="status-dot">
           <span class="dot pulse"></span>
@@ -43,23 +52,36 @@
         <span id="pageUrl" class="url-label"></span>
       </div>
 
+      <!-- ══ CARD FORM ══ -->
       <div class="card-form">
-        <div class="section-label">Card Setup</div>
-
-        <div class="card-type-row">
-          <button class="type-btn" data-type="VISA">VISA</button>
-          <button class="type-btn" data-type="MASTERCARD">MASTER</button>
-          <button class="type-btn" data-type="UNIONPAY">UNION</button>
+        <div class="section-header">
+          <div class="section-label">Card Setup</div>
         </div>
 
+        <!-- Network selector -->
+        <div class="card-type-row">
+          <button class="type-btn" data-type="VISA">
+            <span class="type-icon visa-icon">VISA</span>
+          </button>
+          <button class="type-btn" data-type="MASTERCARD">
+            <span class="type-icon mc-icon">MASTERCARD</span>
+          </button>
+          <button class="type-btn" data-type="UNIONPAY">
+            <span class="type-icon cup-icon">UNIONPAY</span>
+          </button>
+        </div>
+
+        <!-- BIN input -->
         <div class="field">
-          <label>BIN (Bank Identification Number)</label>
+          <label>BIN <span class="hint">6–8 digits → auto-detect network</span></label>
           <div class="bin-wrapper">
-            <input type="text" id="binInput" placeholder="e.g. 400000" maxlength="16" inputmode="numeric">
+            <input type="text" id="binInput" placeholder="e.g. 453275" maxlength="16" inputmode="numeric"
+              autocomplete="off">
             <span id="binTypeBadge" class="type-badge">AUTO</span>
           </div>
         </div>
 
+        <!-- Expiry row -->
         <div class="row">
           <div class="field">
             <label>Month <span class="hint">blank = random</span></label>
@@ -71,20 +93,33 @@
           </div>
         </div>
 
+        <!-- CVV standalone -->
         <div class="field">
           <label>CVV <span class="hint">blank = random</span></label>
-          <input type="text" id="cvvInput" placeholder="xxx" maxlength="4" inputmode="numeric">
+          <input type="text" id="cvvInput" placeholder="•••" maxlength="4" inputmode="numeric">
         </div>
 
-        <button id="fillBtn" class="fill-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          Fill Checkout Form
-        </button>
+        <!-- Two action buttons -->
+        <div class="btn-row">
+          <button id="fillFullBtn" class="fill-btn fill-btn-full">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+              <path d="M7 15h2M12 15h5" stroke-linecap="round" />
+            </svg>
+            Fill Full
+          </button>
+          <button id="fillCardBtn" class="fill-btn fill-btn-card">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+            </svg>
+            Fill Card
+          </button>
+        </div>
       </div>
 
-      <!-- Step Log -->
+      <!-- Fill Log -->
       <div class="log-panel">
         <div class="log-header">
           <span>Fill Log</span>
@@ -94,7 +129,6 @@
           <div class="log-empty">Waiting for fill action...</div>
         </div>
       </div>
-
     </div>
 
     <!-- SETTINGS SCREEN -->
@@ -112,9 +146,12 @@
       </header>
 
       <div class="settings-body">
+
+        <div class="settings-section-title">💳 Card</div>
+
         <div class="setting-group">
-          <div class="setting-label">Default BIN</div>
-          <input type="text" id="defaultBin" placeholder="Leave empty for manual entry" maxlength="16">
+          <div class="setting-label">Default BIN <span class="hint">6–8 digits, auto-filled on open</span></div>
+          <input type="text" id="defaultBin" placeholder="e.g. 62581426" maxlength="16" inputmode="numeric">
         </div>
 
         <div class="setting-group">
@@ -123,12 +160,61 @@
             <option value="">Auto Detect</option>
             <option value="VISA">Visa</option>
             <option value="MASTERCARD">Mastercard</option>
-            <option value="AMEX">American Express</option>
-            <option value="DISCOVER">Discover</option>
             <option value="UNIONPAY">UnionPay</option>
-            <option value="JCB">JCB</option>
           </select>
         </div>
+
+        <div class="row">
+          <div class="setting-group">
+            <div class="setting-label">Default Month</div>
+            <input type="text" id="defaultMonth" placeholder="MM" maxlength="2" inputmode="numeric">
+          </div>
+          <div class="setting-group">
+            <div class="setting-label">Default Year</div>
+            <input type="text" id="defaultYear" placeholder="YYYY" maxlength="4" inputmode="numeric">
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Default CVV <span class="hint">blank = random</span></div>
+          <input type="text" id="defaultCvv" placeholder="•••" maxlength="4" inputmode="numeric">
+        </div>
+
+        <div class="settings-section-title">🏠 Billing Address <span class="hint">blank = random Korean address</span>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Full Name</div>
+          <input type="text" id="defaultName" placeholder="leave blank → random Korean name" maxlength="60">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">State / Do Si <span class="hint">e.g. Daejeon</span></div>
+          <input type="text" id="defaultState" placeholder="e.g. Daejeon" maxlength="60">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">City</div>
+          <input type="text" id="defaultCity" placeholder="e.g. Seo-gu Dunsan-dong" maxlength="60">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Address Line 1</div>
+          <input type="text" id="defaultAddress1" placeholder="e.g. 1973-3 Ga-gil" maxlength="100">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Address Line 2 <span class="hint">optional</span></div>
+          <input type="text" id="defaultAddress2" placeholder="Apt, suite, unit..." maxlength="100">
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Postal Code</div>
+          <input type="text" id="defaultPostal" placeholder="e.g. 35208" maxlength="20">
+        </div>
+
+
+        <div class="settings-section-title">⚙️ Behavior</div>
 
         <div class="setting-group">
           <div class="setting-label">Fill Delay (ms)</div>
@@ -136,13 +222,14 @@
           <div class="setting-hint">Delay between each field fill. Increase if site needs time to react.</div>
         </div>
 
-        <button id="saveSettingsBtn" class="fill-btn">Save Settings</button>
+        <button id="saveSettingsBtn" class="fill-btn">💾 Save Settings</button>
       </div>
     </div>
 
   </div>
 
   <script src="cardGenerator.js"></script>
+  <script src="dataGenerator.js"></script>
   <script src="popup.js"></script>
 </body>
 

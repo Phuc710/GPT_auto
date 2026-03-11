@@ -5,7 +5,8 @@
   "description": "Auto-fill payment forms with BIN-based card generator and random addresses (US & Korea)",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://pay.openai.com/*",
@@ -22,9 +23,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["cardGenerator.js", "dataGenerator.js", "content.js"],
-      "run_at": "document_idle"
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "cardGenerator.js",
+        "dataGenerator.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "icons": {

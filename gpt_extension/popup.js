@@ -1,4 +1,4 @@
-// Auto Fill GPT - Popup Script
+// Auto Fill GPT - Popup Script (v4 — dual button)
 document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Elements ─────────────────────────────────────────────
@@ -6,27 +6,50 @@ document.addEventListener('DOMContentLoaded', () => {
   const monthInput = document.getElementById('monthInput');
   const yearInput = document.getElementById('yearInput');
   const cvvInput = document.getElementById('cvvInput');
+
   const binTypeBadge = document.getElementById('binTypeBadge');
   const typeBtns = document.querySelectorAll('.type-btn');
-  const fillBtn = document.getElementById('fillBtn');
+  const fillFullBtn = document.getElementById('fillFullBtn');
+  const fillCardBtn = document.getElementById('fillCardBtn');
   const clearLogBtn = document.getElementById('clearLogBtn');
   const logContainer = document.getElementById('logContainer');
   const pageStatus = document.getElementById('pageStatus');
   const pageUrl = document.getElementById('pageUrl');
+  const reloadTabBtn = document.getElementById('reloadTabBtn');
 
   // Settings screen
   const settingsBtn = document.getElementById('settingsBtn');
   const backBtn = document.getElementById('backBtn');
   const mainScreen = document.getElementById('mainScreen');
   const settingsScreen = document.getElementById('settingsScreen');
-  const defaultBin = document.getElementById('defaultBin');
-  const defaultCardType = document.getElementById('defaultCardType');
-  const fillDelay = document.getElementById('fillDelay');
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+
+  // Settings fields — card
+  const s_bin = document.getElementById('defaultBin');
+  const s_cardType = document.getElementById('defaultCardType');
+  const s_month = document.getElementById('defaultMonth');
+  const s_year = document.getElementById('defaultYear');
+  const s_cvv = document.getElementById('defaultCvv');
+  // Settings fields — billing address
+  const s_name = document.getElementById('defaultName');
+  const s_state = document.getElementById('defaultState');
+  const s_addr1 = document.getElementById('defaultAddress1');
+  const s_addr2 = document.getElementById('defaultAddress2');
+  const s_city = document.getElementById('defaultCity');
+  const s_postal = document.getElementById('defaultPostal');
+  // Settings fields — behavior
+  const s_delay = document.getElementById('fillDelay');
 
   // ─── State ────────────────────────────────────────────────
   let selectedType = '';
-  let settings = { fillDelay: 100, defaultBin: '', defaultCardType: '' };
+  let settings = {
+    fillDelay: 100,
+    defaultBin: '', defaultCardType: '',
+    defaultMonth: '', defaultYear: '', defaultCvv: '',
+    defaultName: '', defaultState: '',
+    defaultAddress1: '', defaultAddress2: '',
+    defaultCity: '', defaultPostal: ''
+  };
 
   // ─── Init ─────────────────────────────────────────────────
   loadSettings();
@@ -34,74 +57,138 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── Navigation ───────────────────────────────────────────
   settingsBtn.addEventListener('click', () => {
+    populateSettingsUI();
     mainScreen.style.display = 'none';
     settingsScreen.style.display = 'flex';
   });
-
   backBtn.addEventListener('click', () => {
     settingsScreen.style.display = 'none';
     mainScreen.style.display = 'flex';
   });
 
   saveSettingsBtn.addEventListener('click', () => {
-    settings.defaultBin = defaultBin.value.replace(/\D/g, '');
-    settings.defaultCardType = defaultCardType.value;
-    settings.fillDelay = parseInt(fillDelay.value) || 100;
+    settings.defaultBin = (s_bin.value || '').replace(/\D/g, '');
+    settings.defaultCardType = s_cardType.value;
+    settings.defaultMonth = (s_month.value || '').replace(/\D/g, '');
+    settings.defaultYear = (s_year.value || '').replace(/\D/g, '');
+    settings.defaultCvv = (s_cvv.value || '').replace(/\D/g, '');
+    settings.defaultName = s_name.value.trim();
+    settings.defaultState = s_state.value.trim();
+    settings.defaultAddress1 = s_addr1.value.trim();
+    settings.defaultAddress2 = s_addr2.value.trim();
+    settings.defaultCity = s_city.value.trim();
+    settings.defaultPostal = s_postal.value.trim();
+    settings.fillDelay = parseInt(s_delay.value) || 100;
+
     chrome.storage.local.set({ afSettings: settings }, () => {
+      applySettingsToMainForm();
       saveSettingsBtn.textContent = '✓ Saved!';
-      setTimeout(() => saveSettingsBtn.textContent = 'Save Settings', 1500);
+      setTimeout(() => { saveSettingsBtn.textContent = '💾 Save Settings'; }, 1500);
     });
   });
 
-  // ─── Type Selector Buttons ────────────────────────────────
+  // ─── Network Type Buttons ─────────────────────────────────
   typeBtns.forEach(btn => btn.addEventListener('click', () => {
     const t = btn.dataset.type;
     if (selectedType === t) {
       selectedType = '';
       typeBtns.forEach(b => b.classList.remove('active'));
-      updateTypeBadge(CardGenerator.detectCardType(binInput.value)?.type || 'AUTO');
+      const detected = CardGenerator.detectCardType(binInput.value);
+      applyNetworkUI(detected ? detected.type : null);
     } else {
       selectedType = t;
       typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === t));
-      updateTypeBadge(t);
+      applyNetworkUI(t);
+      if (!binInput.value) {
+        binInput.value = CardGenerator.generateRandomBIN(t);
+        binInput.dispatchEvent(new Event('input'));
+        return;
+      }
     }
   }));
 
-  // ─── BIN Input ────────────────────────────────────────────
+  // ─── BIN Input → live auto-detect ─────────────────────────
   binInput.addEventListener('input', () => {
     binInput.value = binInput.value.replace(/\D/g, '');
     const detected = CardGenerator.detectCardType(binInput.value);
     if (detected && !selectedType) {
-      updateTypeBadge(detected.type);
-      // Auto-highlight match
       typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === detected.type));
-    } else {
-      updateTypeBadge(selectedType || 'AUTO');
+      applyNetworkUI(detected.type);
+    } else if (!selectedType) {
+      typeBtns.forEach(b => b.classList.remove('active'));
+      applyNetworkUI(null);
     }
   });
 
-  // Only digits for month/year/cvv
+  // ─── Other inputs ─────────────────────────────────────────
   [monthInput, yearInput, cvvInput].forEach(el => {
     el.addEventListener('input', () => { el.value = el.value.replace(/\D/g, ''); });
   });
 
   // ─── Clear log ────────────────────────────────────────────
   clearLogBtn.addEventListener('click', () => {
+    logEntries = [];
+    chrome.storage.local.remove('afLog');
     logContainer.innerHTML = '<div class="log-empty">Waiting for fill action...</div>';
   });
 
-  // ─── FILL ─────────────────────────────────────────────────
-  fillBtn.addEventListener('click', () => {
-    const bin = binInput.value.trim();
-    if (!bin) {
-      addLog('error', '✗', 'BIN is required.');
-      return;
-    }
+  reloadTabBtn.addEventListener('click', () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.reload(tabs[0].id);
+        addLog('info', '↻', 'Reloading page...');
+      }
+    });
+  });
 
-    // Build card
-    let card;
+  // ─── FILL FULL (Card + Address) ───────────────────────────
+  fillFullBtn.addEventListener('click', () => {
+    const card = buildCard();
+    if (!card) return;
+
+    // Smart address: use settings if all key fields filled, else random Korean
+    const addr = buildAddress(true);
+
+    logEntries = [];
+    logContainer.innerHTML = '';
+    addLog('info', 'ℹ', `Network: ${card.type} ${card.emoji} | Luhn: ✓ valid`);
+    addLog('step', '→', `PAN: ${card.numberFormatted}`);
+    addLog('step', '→', `Expiry: ${card.expiry.formatted} | CVV: ${card.cvv}`);
+    if (addr._isRandom) {
+      addLog('info', '🎲', `Random address: ${addr.name} — ${addr.line1}, ${addr.city}`);
+    }
+    addLog('info', '⏳', 'Sending to page...');
+
+    setButtonsDisabled(true);
+
+    triggerFill(card, addr);
+  });
+
+  // ─── FILL CARD ONLY (no address) ──────────────────────────
+  fillCardBtn.addEventListener('click', () => {
+    const card = buildCard();
+    if (!card) return;
+
+    logEntries = [];
+    logContainer.innerHTML = '';
+    addLog('info', 'ℹ', `Network: ${card.type} ${card.emoji} | Luhn: ✓ valid`);
+    addLog('step', '→', `PAN: ${card.numberFormatted}`);
+    addLog('step', '→', `Expiry: ${card.expiry.formatted} | CVV: ${card.cvv}`);
+    addLog('info', '⏳', 'Sending to page...');
+
+    setButtonsDisabled(true);
+
+    triggerFill(card, {}); // empty address = card only
+  });
+
+  // ─── Core helpers ─────────────────────────────────────────
+
+  /** Build card from inputs, returns null on error */
+  function buildCard() {
+    const bin = binInput.value.trim();
+    if (!bin) { addLog('error', '✗', 'BIN is required.'); return null; }
     try {
-      card = CardGenerator.generateFullCard(bin, {
+      return CardGenerator.generateFullCard(bin, {
         month: monthInput.value.trim() || null,
         year: yearInput.value.trim() || null,
         cvv: cvvInput.value.trim() || null,
@@ -109,40 +196,69 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     } catch (e) {
       addLog('error', '✗', `Card error: ${e.message}`);
-      return;
+      return null;
+    }
+  }
+
+  /**
+   * Build address payload.
+   * If settings has all key fields → use settings.
+   * Otherwise → pick random Korean address from DataGenerator.
+   */
+  function buildAddress(includeAddress) {
+    if (!includeAddress) return {};
+
+    const hasSettings =
+      settings.defaultName &&
+      settings.defaultState &&
+      settings.defaultCity &&
+      settings.defaultAddress1 &&
+      settings.defaultPostal;
+
+    if (hasSettings) {
+      return {
+        name: settings.defaultName,
+        state: settings.defaultState,
+        city: settings.defaultCity,
+        line1: settings.defaultAddress1,
+        line2: settings.defaultAddress2 || '',
+        postal: settings.defaultPostal,
+        _isRandom: false
+      };
     }
 
-    logContainer.innerHTML = '';
-    addLog('info', 'ℹ', `Card type: ${card.type} | Luhn: ${card.isValid ? 'valid' : 'INVALID'}`);
-    addLog('step', '→', `Number: ${card.numberFormatted}`);
-    addLog('step', '→', `Expiry: ${card.expiry.formatted} | CVV: ${card.cvv}`);
-    addLog('info', '⏳', 'Sending to page...');
+    // Fall back to random Korean address
+    const rand = window.DataGenerator.getRandomKoreanAddress();
+    return { ...rand, _isRandom: true };
+  }
 
-    fillBtn.disabled = true;
-    fillBtn.textContent = 'Filling...';
-
+  function triggerFill(card, address) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) {
         addLog('error', '✗', 'No active tab found.');
-        resetFillBtn(); return;
+        setButtonsDisabled(false);
+        return;
       }
 
-      chrome.tabs.sendMessage(tabs[0].id, {
+      const payload = {
         action: 'fillForm',
         cardData: card,
+        address: address,
         fillDelay: settings.fillDelay
-      }, (response) => {
-        resetFillBtn();
+      };
 
-        if (chrome.runtime.lastError) {
-          addLog('error', '✗', `Tab error: ${chrome.runtime.lastError.message}`);
+      sendFillMessage(tabs[0].id, payload, (response, errorMessage) => {
+        setButtonsDisabled(false);
+
+        if (errorMessage) {
+          addLog('error', '✗', `Tab error: ${errorMessage}`);
           return;
         }
 
         if (response && response.success) {
           addLog('success', '✓', 'Form filled successfully!');
           if (response.log && response.log.length) {
-            response.log.forEach(entry => addLog(entry.type || 'step', entry.icon || '·', entry.msg));
+            response.log.forEach(e => addLog(e.type || 'step', e.icon || '·', e.msg));
           }
           chrome.storage.local.set({
             lastFilled: {
@@ -152,30 +268,99 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           });
         } else {
-          addLog('error', '✗', response?.error || 'Fill failed. Is the page a checkout form?');
+          addLog('error', '✗', response?.error || 'Fill failed. Is this a checkout page?');
           if (response?.log) {
-            response.log.forEach(entry => addLog(entry.type || 'warn', entry.icon || '·', entry.msg));
+            response.log.forEach(e => addLog(e.type || 'warn', e.icon || '·', e.msg));
           }
         }
       });
     });
-  });
-
-  // ─── Helpers ──────────────────────────────────────────────
-  function updateTypeBadge(type) {
-    binTypeBadge.textContent = type;
-    binTypeBadge.style.background = type === 'AUTO' ? '#30363d' : '#3b82f6';
   }
 
+  function setButtonsDisabled(disabled) {
+    fillFullBtn.disabled = disabled;
+    fillCardBtn.disabled = disabled;
+    if (disabled) {
+      fillFullBtn.textContent = 'Filling...';
+      fillCardBtn.textContent = 'Filling...';
+    } else {
+      fillFullBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M7 15h2M12 15h5" stroke-linecap="round"/></svg> Fill Full`;
+      fillCardBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Fill Card`;
+    }
+  }
+
+  // ─── Network UI ───────────────────────────────────────────
+  function applyNetworkUI(typeKey) {
+    if (!typeKey) { updateBadge('AUTO', '#30363d'); return; }
+    const info = CardGenerator.CARD_TYPES[typeKey];
+    if (!info) return;
+    updateBadge(info.shortName, info.color);
+  }
+
+  function updateBadge(text, color) {
+    binTypeBadge.textContent = text;
+    binTypeBadge.style.background = color;
+  }
+
+  // ─── Settings Helpers ─────────────────────────────────────
+
+  function populateSettingsUI() {
+    s_bin.value = settings.defaultBin || '';
+    s_cardType.value = settings.defaultCardType || '';
+    s_month.value = settings.defaultMonth || '';
+    s_year.value = settings.defaultYear || '';
+    s_cvv.value = settings.defaultCvv || '';
+    s_name.value = settings.defaultName || '';
+    s_state.value = settings.defaultState || '';
+    s_addr1.value = settings.defaultAddress1 || '';
+    s_addr2.value = settings.defaultAddress2 || '';
+    s_city.value = settings.defaultCity || '';
+    s_postal.value = settings.defaultPostal || '';
+    s_delay.value = settings.fillDelay || 100;
+  }
+
+  function applySettingsToMainForm() {
+    if (settings.defaultBin) {
+      binInput.value = settings.defaultBin;
+      binInput.dispatchEvent(new Event('input'));
+    }
+    if (settings.defaultMonth) monthInput.value = settings.defaultMonth;
+    if (settings.defaultYear) yearInput.value = settings.defaultYear;
+    if (settings.defaultCvv) cvvInput.value = settings.defaultCvv;
+    if (settings.defaultCardType) {
+      selectedType = settings.defaultCardType;
+      typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === selectedType));
+      applyNetworkUI(selectedType);
+    }
+  }
+
+  // ─── Log (with persistence) ───────────────────────────────
+  let logEntries = [];
+
   function addLog(type, icon, msg) {
-    // Remove "waiting" message if present
     const empty = logContainer.querySelector('.log-empty');
     if (empty) empty.remove();
-
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
     entry.innerHTML = `<span class="log-icon">${icon}</span><span class="log-text">${escapeHtml(msg)}</span>`;
     logContainer.appendChild(entry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+    logEntries.push({ type, icon, msg });
+    chrome.storage.local.set({ afLog: logEntries });
+  }
+
+  function renderLog(entries) {
+    logContainer.innerHTML = '';
+    if (!entries || entries.length === 0) {
+      logContainer.innerHTML = '<div class="log-empty">Waiting for fill action...</div>';
+      return;
+    }
+    entries.forEach(e => {
+      const el = document.createElement('div');
+      el.className = `log-entry ${e.type}`;
+      el.innerHTML = `<span class="log-icon">${e.icon}</span><span class="log-text">${escapeHtml(e.msg)}</span>`;
+      logContainer.appendChild(el);
+    });
     logContainer.scrollTop = logContainer.scrollHeight;
   }
 
@@ -183,39 +368,77 @@ document.addEventListener('DOMContentLoaded', () => {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function resetFillBtn() {
-    fillBtn.disabled = false;
-    fillBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg> Fill Checkout Form`;
+  // Listen for logs from content scripts (multi-frame)
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.action === 'log_step') {
+      addLog(msg.type, msg.icon, msg.msg);
+    }
+  });
+
+  function sendFillMessage(tabId, payload, done, retried = false) {
+    chrome.tabs.sendMessage(tabId, payload, (response) => {
+      const lastError = chrome.runtime.lastError;
+      const errorMessage = lastError ? lastError.message : '';
+
+      if (!lastError) { done(response, ''); return; }
+
+      if (!retried && /Receiving end does not exist/i.test(errorMessage)) {
+        addLog('warn', '↻', 'Content script missing. Injecting and retrying...');
+        injectContentScripts(tabId, (injectError) => {
+          if (injectError) { done(null, injectError); return; }
+          window.setTimeout(() => { sendFillMessage(tabId, payload, done, true); }, 150);
+        });
+        return;
+      }
+
+      done(response, errorMessage);
+    });
+  }
+
+  function injectContentScripts(tabId, done) {
+    if (!chrome.scripting || !chrome.scripting.executeScript) {
+      done('Content script is not available. Reload the extension and refresh the page.');
+      return;
+    }
+    chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['cardGenerator.js', 'dataGenerator.js', 'content.js']
+    }, () => {
+      const lastError = chrome.runtime.lastError;
+      done(lastError ? lastError.message : '');
+    });
   }
 
   function detectCurrentTab() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return;
-      const url = tabs[0].url || '';
-      pageUrl.textContent = new URL(url).hostname;
-
-      const isCheckout = /pay|checkout|billing|payment|order|cart/i.test(url);
-      if (isCheckout) {
-        pageStatus.textContent = 'Checkout page detected';
-        pageStatus.parentElement.style.color = 'var(--success)';
-      } else {
-        pageStatus.textContent = 'Navigate to a checkout page';
-        pageStatus.parentElement.style.color = 'var(--warn)';
-      }
+      try {
+        const url = tabs[0].url || '';
+        pageUrl.textContent = new URL(url).hostname;
+        const isCheckout = /pay|checkout|billing|payment|order|cart/i.test(url);
+        if (isCheckout) {
+          pageStatus.textContent = 'Checkout page detected';
+          pageStatus.parentElement.style.color = 'var(--success)';
+        } else {
+          pageStatus.textContent = 'Navigate to a checkout page';
+          pageStatus.parentElement.style.color = 'var(--warn)';
+        }
+      } catch (_) { }
     });
   }
 
   function loadSettings() {
-    chrome.storage.local.get(['afSettings'], (res) => {
+    chrome.storage.local.get(['afSettings', 'afLog'], (res) => {
       if (res.afSettings) {
         settings = { ...settings, ...res.afSettings };
-        fillDelay.value = settings.fillDelay;
-        defaultCardType.value = settings.defaultCardType || '';
-        if (settings.defaultBin) {
-          binInput.value = settings.defaultBin;
-          binInput.dispatchEvent(new Event('input'));
-        }
+      }
+      applySettingsToMainForm();
+
+      if (res.afLog && res.afLog.length) {
+        logEntries = res.afLog;
+        renderLog(logEntries);
       }
     });
   }
+
 });
