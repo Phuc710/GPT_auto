@@ -145,8 +145,8 @@ class KaiMailAPI:
             )
             return response
         except requests.RequestException as e:
-            Logger.error(f"API connection error: {e}")
-            return None
+            Logger.error(f"Lỗi kết nối API: {e}")
+            return False
 
     # ------------------------------------------------------------------
     # Email management
@@ -163,7 +163,7 @@ class KaiMailAPI:
             "quantity": 1,  # always 1 per registration
         }
 
-        Logger.info("Creating temp email via HMAC API...")
+        Logger.info("Đang tạo email tạm thời qua HMAC API...")
 
         resp = self._request("POST", "/api/emails.php", body=payload)
 
@@ -277,8 +277,8 @@ class KaiMailAPI:
     # ------------------------------------------------------------------
 
     def wait_for_openai_email(self, timeout: int = 300, interval: int = 5) -> Optional[str]:
-        """Poll inbox until an OpenAI verification email arrives, then return the 6-digit code."""
-        Logger.waiting("Waiting for OpenAI verification email...")
+        """Kiểm tra hộp thư cho đến khi email xác minh OpenAI đến."""
+        Logger.waiting("Đang chờ email xác minh OpenAI...")
 
         if not self.email:
             Logger.error("No email set")
@@ -317,10 +317,10 @@ class KaiMailAPI:
                         Logger.success(f"Verification code: {code}")
                         return code
 
-            Logger.debug(f"Checking inbox... ({remaining}s left)")
+            Logger.debug(f"Đang kiểm tra hộp thư... (còn {remaining}s)")
             time.sleep(interval)
 
-        Logger.error("Timeout waiting for verification email")
+        Logger.error("Hết thời gian chờ email xác minh")
         return None
 
     @staticmethod

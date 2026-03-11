@@ -1,9 +1,10 @@
 # gpt_selenium.py - Selenium automation for ChatGPT registration
 
-import random
-import shutil
 import time
-from pathlib import Path
+import sys
+import random
+import os
+import shutil
 from typing import Optional
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -11,14 +12,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 
-from config import PROXY, USER_AGENT, WAIT_TIME, DEFAULT_PASSWORD, USE_ANTI_DETECT, RANDOM_DELAYS, MIN_DELAY_MS, MAX_DELAY_MS
-from anti_detect import (
-    apply_anti_fingerprint,
-    build_fingerprint,
-    clear_browser_state,
-    random_delay,
-    random_scroll,
-)
+from config import WAIT_TIME, DEFAULT_PASSWORD, USE_ANTI_DETECT, RANDOM_DELAYS, MIN_DELAY_MS, MAX_DELAY_MS
+from anti_detect import get_random_user_agent, random_delay, random_scroll
 from step_tracker import Logger  # Shared logger with colored output
 
 
@@ -200,8 +195,6 @@ class DriverManager:
     
     _port_counter = 9500  # Starting port for multiple browsers
     _port_lock = None  # Will be initialized in create_driver
-    _profile_root = Path(__file__).resolve().parent / ".browser_profiles"
-    _profile_root_prepared = False
     
     @staticmethod
     def _get_next_port():
@@ -216,94 +209,43 @@ class DriverManager:
             if DriverManager._port_counter > 9600:
                 DriverManager._port_counter = 9500
             return port
-
-    @staticmethod
-    def _prepare_profile_root():
-        import threading
-
-        if DriverManager._port_lock is None:
-            DriverManager._port_lock = threading.Lock()
-
-        with DriverManager._port_lock:
-            DriverManager._profile_root.mkdir(parents=True, exist_ok=True)
-            if DriverManager._profile_root_prepared:
-                return
-
-            for child in DriverManager._profile_root.iterdir():
-                if child.is_dir():
-                    shutil.rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink(missing_ok=True)
-
-            DriverManager._profile_root_prepared = True
-
-    @staticmethod
-    def _build_profile_dir(thread_id: int, port: int) -> Path:
-        DriverManager._prepare_profile_root()
-        profile_dir = DriverManager._profile_root / f"thread_{thread_id}_port_{port}"
-        if profile_dir.exists():
-            shutil.rmtree(profile_dir, ignore_errors=True)
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        return profile_dir
-
-    @staticmethod
-    def cleanup_profile_dir(profile_dir: Optional[str | Path]) -> None:
-        if not profile_dir:
-            return
-
-        try:
-            shutil.rmtree(Path(profile_dir), ignore_errors=True)
-        except Exception:
-            pass
     
     @staticmethod
     def create_driver(thread_id: int = 0):
         """Initialize undetected Chrome driver with anti-detection and unique port"""
         options = uc.ChromeOptions()
-
-        fingerprint = build_fingerprint(USER_AGENT if not USE_ANTI_DETECT else None)
-        port = DriverManager._get_next_port() + thread_id
-        profile_dir = DriverManager._build_profile_dir(thread_id, port)
-
-        options.add_argument(f"user-agent={fingerprint.user_agent}")
+        
+        # Use random User-Agent if anti-detect enabled
+        if USE_ANTI_DETECT:
+            user_agent = get_random_user_agent()
+            Logger.info(f"Using random User-Agent")
+        else:
+            # Default fallback if anti-detect is disabled
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        
+        options.add_argument(f"user-agent={user_agent}")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument(f"--window-size={fingerprint.window_size_argument}")
-        options.add_argument("--disable-background-networking")
-        options.add_argument("--disable-background-timer-throttling")
-        options.add_argument("--disable-backgrounding-occluded-windows")
-        options.add_argument("--disable-breakpad")
-        options.add_argument("--disable-component-update")
-        options.add_argument("--disable-default-apps")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-features=Translate,OptimizationHints,IsolateOrigins,site-per-process")
-        options.add_argument("--disable-popup-blocking")
-        options.add_argument("--disable-renderer-backgrounding")
-        options.add_argument("--disable-sync")
-        options.add_argument("--metrics-recording-only")
-        options.add_argument("--mute-audio")
-        options.add_argument("--no-first-run")
-        options.add_argument("--password-store=basic")
-        options.add_argument("--use-mock-keychain")
-        options.add_argument("--disk-cache-size=1")
-        options.add_argument("--media-cache-size=1")
-
-        options.add_argument(f"--user-data-dir={profile_dir}")
-        options.add_argument(f"--remote-debugging-port={port}")
-        options.add_experimental_option(
-            "prefs",
-            {
-                "credentials_enable_service": False,
-                "profile.password_manager_enabled": False,
-                "profile.default_content_setting_values.notifications": 2,
-                "profile.default_content_setting_values.geolocation": 2,
-                "intl.accept_languages": fingerprint.language_header,
-            },
-        )
+        options.add_argument("--window-size=1280,800")
         
-        if PROXY:
-            options.add_argument(f'--proxy-server={PROXY}')
+        # Use unique port and user data dir for each thread to avoid conflicts
+        port = DriverManager._get_next_port() + thread_id
+        _home = os.path.expanduser("~")
+        user_data_dir = os.path.join(_home, "AppData", "Local", "Google", "Chrome", "User Data", f"Profile_{port}")
+        # Clear specific profile data before starting to ensure a fresh session
+        if os.path.exists(user_data_dir):
+            try:
+                # Close any existing chrome processes that might be using this dir
+                shutil.rmtree(user_data_dir, ignore_errors=True)
+                Logger.info(f"Cleared browser profile: {port}")
+            except Exception as e:
+                Logger.warning(f"Could not clear profile: {e}")
+
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument(f"--remote-debugging-port={port}")
+        
+        # Proxy logic removed as per user request
         
         # Initialize driver
         try:
@@ -314,17 +256,8 @@ class DriverManager:
                 driver = uc.Chrome(options=options, headless=False)
             except Exception as e2:
                 Logger.error(f"Cannot start browser: {e2}")
-                DriverManager.cleanup_profile_dir(profile_dir)
                 return None
-
-        driver._profile_dir = str(profile_dir)
-        driver._fingerprint = fingerprint
-
-        if USE_ANTI_DETECT:
-            apply_anti_fingerprint(driver, fingerprint)
-            Logger.info(f"Session fingerprint ready | {fingerprint.platform} | {fingerprint.screen_width}x{fingerprint.screen_height}")
-
-        clear_browser_state(driver)
+        
         return driver
 
 
@@ -340,7 +273,6 @@ class GPTRegistration:
         self.page_detector = PageDetector()
         self.timing = TimingManager()
         self.thread_id = 0
-        self.profile_dir = None
     
     def start(self, thread_id: int = 0) -> bool:
         """Start browser"""
@@ -350,8 +282,7 @@ class GPTRegistration:
             self.driver = DriverManager.create_driver(thread_id=thread_id)
             if self.driver is None:
                 return False
-            self.profile_dir = getattr(self.driver, "_profile_dir", None)
-            Logger.success("Browser ready")
+            Logger.success("Trình duyệt đã sẵn sàng")
             return True
         except Exception as e:
             Logger.error(f"Cannot start browser: {e}")
@@ -360,7 +291,13 @@ class GPTRegistration:
     def go_to_signup(self) -> bool:
         """Navigate to ChatGPT and click Log in button"""
         try:
-            Logger.sub("Navigate to ChatGPT...")
+            # Extra safety: clear cookies and session storage before navigation
+            try:
+                self.driver.delete_all_cookies()
+            except:
+                pass
+
+            Logger.sub("Đang điều hướng đến ChatGPT...")
             old_url = self.driver.current_url
             self.driver.get("https://chatgpt.com/")
             
@@ -427,9 +364,9 @@ class GPTRegistration:
             time.sleep(self.timing.get_action_delay("after_click"))
             
             if not self.page_detector.wait_for_url_change(self.driver, old_url, timeout=10):
-                Logger.debug("URL not changed, may be modal popup")
+                Logger.debug("URL không đổi, có thể là modal popup")
             
-            Logger.success("Navigated to login page")
+            Logger.success("Đã chuyển đến trang đăng nhập")
             return True
             
         except TimeoutException:
@@ -465,7 +402,7 @@ class GPTRegistration:
             else:
                 email_input.send_keys(email)
             
-            Logger.info(f"Entered email: {email}")
+            Logger.info(f"Đã nhập email: {email}")
             time.sleep(self.timing.get_action_delay("after_click"))
             
             # Click Continue button
@@ -493,7 +430,7 @@ class GPTRegistration:
                     if self.page_detector.wait_for_element_present(
                         self.driver, (By.XPATH, "//input[@type='password']"), timeout=5
                     ):
-                        Logger.success("Moved to password page")
+                        Logger.success("Đã chuyển đến trang mật khẩu")
                         success = True
                         break
                     
@@ -510,7 +447,7 @@ class GPTRegistration:
                     time.sleep(1)
             
             if not success:
-                Logger.error("Cannot move to password page")
+                Logger.error("Không thể chuyển đến trang mật khẩu")
             
             return success
             
@@ -549,7 +486,7 @@ class GPTRegistration:
             else:
                 password_input.send_keys(self.password)
                 
-            Logger.info("Entered password")
+            Logger.info("Đã nhập mật khẩu")
             time.sleep(self.timing.get_action_delay("after_click"))
             
             # Click Continue
@@ -575,7 +512,7 @@ class GPTRegistration:
                     # Check for verification code input
                     code_locator = (By.XPATH, "//input[contains(@id, 'code') or @name='code' or contains(@placeholder, 'code')]")
                     if self.page_detector.wait_for_element_present(self.driver, code_locator, timeout=5):
-                        Logger.success("Moved to verification page")
+                        Logger.success("Đã chuyển đến trang xác minh")
                         success = True
                         break
                     
@@ -593,7 +530,7 @@ class GPTRegistration:
                     time.sleep(1)
             
             if not success:
-                Logger.error("Cannot move to verification page")
+                Logger.error("Không thể chuyển đến trang xác minh")
             
             return success
             
@@ -627,13 +564,13 @@ class GPTRegistration:
                     code_input = self.driver.find_element(By.XPATH, selector)
                     code_input.clear()
                     code_input.send_keys(code)
-                    Logger.info(f"Entered code: {code}")
+                    Logger.info(f"Đã nhập mã: {code}")
                     time.sleep(self.timing.get_action_delay("after_click"))
                     
                     # Click Continue
                     continue_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Continue')]")
                     continue_btn.click()
-                    Logger.success("Clicked Continue (verification)")
+                    Logger.success("Đã nhấn Tiếp tục (xác minh)")
                     
                     # Wait for transition
                     time.sleep(self.timing.get_action_delay("transition"))
@@ -671,7 +608,9 @@ class GPTRegistration:
                        "Miller", "Davis", "Wilson", "Taylor", "Anderson"]
 
         full_name   = f"{random.choice(first_names)} {random.choice(last_names)}"
-        birth_year  = random.randint(1990, 2000)
+        # Birth year (18-25 years old as requested)
+        current_year = time.localtime().tm_year
+        birth_year  = random.randint(current_year - 25, current_year - 18)
         birth_month = random.randint(1, 12)
         birth_day   = random.randint(1, 28)
 
@@ -683,6 +622,7 @@ class GPTRegistration:
             "Get started",
             "Done",
             "Finish",
+            "Finish creating account",
         ]
 
         try:
@@ -727,29 +667,74 @@ class GPTRegistration:
 
             time.sleep(self.timing.get_action_delay("after_click"))
 
-            # ── Enter Birthday ─────────────────────────────────────────
-            # Click container first to focus the widget
+            # Use JavaScript for a more robust entry of the birthday
+            # This handles both separate fields and single masked fields
+            # We try to find any input, div or select that looks like birthday
             try:
-                bday_container = self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    "div[role='group'][aria-labelledby*='birthday'], div[id*='birthday']"
-                )
-                bday_container.click()
-                time.sleep(0.3)
-            except (NoSuchElementException, Exception):
-                pass
+                self.driver.execute_script(f"""
+                    function fillBirthday(m, d, y) {{
+                        const mStr = m.toString().padStart(2, '0');
+                        const dStr = d.toString().padStart(2, '0');
+                        const yStr = y.toString();
 
+                        // Try separate fields by data-type (Radix/React UI)
+                        const typeMap = {{'month': mStr, 'day': dStr, 'year': yStr}};
+                        for (const [type, val] of Object.entries(typeMap)) {{
+                            const el = document.querySelector(`div[data-type="${{type}}"][role="spinbutton"], input[name="${{type}}"], input[id*="${{type}}"]`);
+                            if (el) {{
+                                el.focus();
+                                if (el.tagName === 'INPUT') {{
+                                    el.value = val;
+                                }} else {{
+                                    el.innerText = val;
+                                }}
+                                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                el.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                            }}
+                        }}
+
+                        // Try combined input (DD/MM/YYYY or MM/DD/YYYY)
+                        // Note: Some inputs are sensitive to character-by-character vs full string
+                        const bdayInputs = document.querySelectorAll('input[type="text"][placeholder*="YYYY"], input[name*="birth"], input[id*="birth"]');
+                        if (bdayInputs.length > 0) {{
+                            const fullVal = `${{mStr}}${{dStr}}${{yStr}}`; // Try without slash first, or detect placeholder
+                            bdayInputs.forEach(input => {{
+                                input.focus();
+                                // Clean existing
+                                input.value = "";
+                                // Use a simplified string if it's an auto-formatter
+                                input.value = fullVal;
+                                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            }});
+                        }}
+                    }}
+                    fillBirthday({birth_month}, {birth_day}, {birth_year});
+                """)
+                Logger.info(f"Đã nhập ngày sinh: {birth_month:02d}/{birth_day:02d}/{birth_year}")
+            except Exception as e:
+                Logger.debug(f"JS birthday fill failed: {e}")
+                
+            # Fallback to ActionChains if JS didn't work or for additional stability
             for dtype, val in [("month", birth_month), ("day", birth_day), ("year", birth_year)]:
                 try:
-                    spinner = self.driver.find_element(
-                        By.CSS_SELECTOR, f"div[data-type='{dtype}'][role='spinbutton']"
-                    )
-                    ac = ActionChains(self.driver)
-                    ac.click(spinner).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL)
-                    ac.send_keys(str(val)).perform()
-                    time.sleep(0.15)
-                except (NoSuchElementException, Exception) as e:
-                    Logger.debug(f"Cannot set {dtype}: {e}")
+                    locators = [
+                        (By.CSS_SELECTOR, f"div[data-type='{dtype}'][role='spinbutton']"),
+                        (By.NAME, dtype),
+                        (By.ID, dtype)
+                    ]
+                    for loc in locators:
+                        try:
+                            el = self.driver.find_element(*loc)
+                            ac = ActionChains(self.driver)
+                            ac.click(el).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL)
+                            ac.send_keys(Keys.BACKSPACE).send_keys(str(val)).perform()
+                            break
+                        except:
+                            continue
+                except:
+                    pass
 
             Logger.sub(f"Birthday: {birth_month:02d}/{birth_day:02d}/{birth_year}")
             time.sleep(self.timing.get_action_delay("after_click"))
@@ -832,13 +817,13 @@ class GPTRegistration:
             # Explicit success pages
             if page_type in ("chat", "onboarding", "welcome"):
                 self.status = "success"
-                Logger.success("Registration successful!")
+                Logger.success("Đăng ký thành công!")
                 return True
 
             # Broader: any chatgpt.com page that is NOT an error/auth page = likely success
             if "chatgpt.com" in current_url and "error" not in current_url:
                 self.status = "success"
-                Logger.success(f"Landed on ChatGPT page - marking success")
+                Logger.success(f"Đã chuyển đến trang ChatGPT - Đánh dấu thành công")
                 return True
 
             Logger.warning(f"Unexpected page after registration: {page_type}")
@@ -860,7 +845,7 @@ class GPTRegistration:
         """
         SESSION_URL = "https://chatgpt.com/api/auth/session"
         try:
-            Logger.sub(f"Fetching session from {SESSION_URL}")
+            Logger.sub(f"Đang lấy session từ {SESSION_URL}")
             self.driver.get(SESSION_URL)
             time.sleep(2)
 
@@ -933,13 +918,9 @@ class GPTRegistration:
         try:
             if self.driver:
                 self.driver.quit()
-                Logger.info("Browser closed")
+                Logger.info("Đã đóng trình duyệt")
         except Exception as e:
             Logger.warning(f"Error closing browser: {e}")
-        finally:
-            DriverManager.cleanup_profile_dir(self.profile_dir)
-            self.driver = None
-            self.profile_dir = None
 
 
 # ============ QUICK TEST ============

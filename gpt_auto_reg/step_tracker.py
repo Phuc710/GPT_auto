@@ -168,9 +168,9 @@ class StepTracker:
         W = self.WIDTH
         print(f"\n{Color.BOLD}{'=' * W}{Color.RESET}")
         if success:
-            print(f"{Color.GREEN}{Color.BOLD}  ✓  THANH CONG{Color.RESET}")
+            print(f"{Color.GREEN}{Color.BOLD}  ✓  THÀNH CÔNG{Color.RESET}")
         else:
-            print(f"{Color.RED}{Color.BOLD}  ✗  THAT BAI{Color.RESET}")
+            print(f"{Color.RED}{Color.BOLD}  ✗  THẤT BẠI{Color.RESET}")
 
         if detail:
             print(f"     {detail}")
@@ -179,8 +179,8 @@ class StepTracker:
         done_count    = sum(1 for s in self.steps if s.status == StepStatus.DONE)
         failed_count  = sum(1 for s in self.steps if s.status == StepStatus.FAILED)
         total_steps   = len([s for s in self.steps if s.status != StepStatus.SKIPPED])
-        print(f"  {Color.GRAY}Steps: {done_count}/{total_steps} hoan thanh"
-              + (f"  |  {failed_count} loi" if failed_count else "")
+        print(f"  {Color.GRAY}Các bước: {done_count}/{total_steps} hoàn thành"
+              + (f"  |  {failed_count} lỗi" if failed_count else "")
               + Color.RESET)
 
         # Failed steps detail
@@ -188,8 +188,8 @@ class StepTracker:
             if s.status == StepStatus.FAILED and s.error:
                 print(f"  {Color.RED}  → {s.label}: {s.error}{Color.RESET}")
 
-        total_str = f"{total:.1f}s" if total < 60 else f"{int(total//60)}m {int(total%60)}s"
-        print(f"  {Color.GRAY}Tong thoi gian: {total_str}{Color.RESET}")
+        total_str = f"{total:.1f}s" if total < 60 else f"{int(total//60)}p {int(total%60)}giây"
+        print(f"  {Color.GRAY}Tổng thời gian: {total_str}{Color.RESET}")
         print(f"{Color.BOLD}{'=' * W}{Color.RESET}\n")
 
     # -------- Internal --------
@@ -293,5 +293,5 @@ class Logger:
 
     @staticmethod
     def sub(msg: str):
-        """Sub-step detail (indented)"""
+        """Chi tiết bước phụ (thụt lề)"""
         print(f"  {Color.GRAY}  → {msg}{Color.RESET}")

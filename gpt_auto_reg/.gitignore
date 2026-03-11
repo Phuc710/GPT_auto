@@ -1,0 +1,12 @@
+# Secrets - KHÔNG đẩy lên Git
+.env
+
+# Browser profiles tạm
+.browser_profiles/
+__pycache__/
+*.pyc
+*.pyo
+
+# Output files (tùy chọn comment nếu muốn lưu)
+# accounts.csv
+# infoacc/
