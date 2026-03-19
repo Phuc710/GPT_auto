@@ -1,0 +1,46 @@
+{
+    "manifest_version": 3,
+    "name": "Auto Fill Spotify - Card Checker",
+    "version": "1.0.0",
+    "description": "Auto-fill and loop card checking on Spotify checkout with detailed logging",
+    "permissions": [
+        "storage",
+        "activeTab",
+        "scripting"
+    ],
+    "host_permissions": [
+        "https://payments.spotify.com/*",
+        "https://pci.spotify.com/*",
+        "https://*/*"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        }
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://payments.spotify.com/*",
+                "https://pci.spotify.com/*"
+            ],
+            "js": [
+                "cardGenerator.js",
+                "content.js"
+            ],
+            "run_at": "document_idle",
+            "all_frames": true
+        }
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    }
+}
