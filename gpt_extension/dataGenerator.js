@@ -3,8 +3,9 @@
  * 50 real Korean addresses for random selection
  */
 
-// 50 real Korean addresses with name, state, city, address, postal
+/// 50 real Korean addresses with name, state, city, address, postal
 const KOREAN_ADDRESSES = [
+  // ... (existing Korean addresses)
   { name: 'Kim Min-jun', state: 'Seoul', city: 'Mapo-gu', line1: '12-3 Mangwon-dong', postal: '04101' },
   { name: 'Lee Seo-yeon', state: 'Seoul', city: 'Yongsan-gu', line1: '45-7 Itaewon-ro', postal: '04349' },
   { name: 'Park Ji-ho', state: 'Seoul', city: 'Gangnam-gu', line1: '218 Teheran-ro', postal: '06141' },
@@ -58,20 +59,66 @@ const KOREAN_ADDRESSES = [
   { name: 'Han Ji-young', state: 'Jeju-do', city: 'Seogwipo', line1: '74-2 Jungang-ro', postal: '63595' }
 ];
 
+// 🇮🇳 Indian Addresses
+const INDIA_ADDRESSES = [
+  { name: 'Rahul Sharma', state: 'Karnataka', city: 'Bengaluru', line1: '44/1, Bharat Apartment, 5th Main Road, Jayanagar', postal: '560041' },
+  { name: 'Anjali Deshmukh', state: 'Maharashtra', city: 'Mumbai', line1: '229, Raghunath Chambers, Opp. Sion Hospital', postal: '400022' },
+  { name: 'Vikram Singh', state: 'Delhi', city: 'New Delhi', line1: '7, Veer Savarkar Block, Madhuban Road, Shakarpur', postal: '110092' },
+  { name: 'Priyanka Chatterjee', state: 'West Bengal', city: 'Kolkata', line1: '12/A, Lake View Enclave, Gariahat Road', postal: '700029' },
+  { name: 'Amit Patel', state: 'Gujarat', city: 'Vadodara', line1: 'Opp. Nehru Bhavan, Rajmahal Road', postal: '390001' },
+  { name: 'Sanjay Gupta', state: 'Uttar Pradesh', city: 'Lucknow', line1: '14/2, Gomti Nagar, Near Marine Drive', postal: '226010' },
+  { name: 'Deepa Rao', state: 'Tamil Nadu', city: 'Chennai', line1: '56, Anna Salai, Mount Road', postal: '600002' },
+  { name: 'Rajesh Kumar', state: 'Punjab', city: 'Chandigarh', line1: 'Sector 17, SCO 45-46', postal: '160017' }
+];
+
+// 🇩🇿 Algeria Addresses
+const ALGERIA_ADDRESSES = [
+  { name: 'Amine Mansouri', state: 'Alger', city: 'Alger', line1: '12 Rue Didouche Mourad', postal: '16000' },
+  { name: 'Fatima Zahra Bensaid', state: 'Oran', city: 'Oran', line1: '45 Boulevard de la Soummam', postal: '31000' },
+  { name: 'Yacine Haddad', state: 'Constantine', city: 'Constantine', line1: '8 Cité des Frères Abbas', postal: '25000' },
+  { name: 'Sarah Belkacem', state: 'Batna', city: 'Batna', line1: '22 Rue de l\'Indépendance', postal: '05000' },
+  { name: 'Karim Meddah', state: 'Tlemcen', city: 'Tlemcen', line1: '10 Avenue des Martyrs', postal: '13000' }
+];
+
+// 🇰🇿 Kazakhstan Addresses
+const KAZAKHSTAN_ADDRESSES = [
+  { name: 'Ablai Khan', state: 'Almaty', city: 'Almaty', line1: 'Ablai Khan Ave, 76, Apt 15', postal: '050000' },
+  { name: 'Nurzhan Berikov', state: 'Astana', city: 'Astana', line1: 'Dostyq St, 8, Apt 22', postal: '010000' },
+  { name: 'Dina Saparova', state: 'Shymkent', city: 'Shymkent', line1: 'Tauke Khan Ave, 12', postal: '160000' },
+  { name: 'Bolat Aktayev', state: 'Aktobe', city: 'Aktobe', line1: 'Aiteke Bi St, 26', postal: '030000' },
+  { name: 'Elena Petrova', state: 'Karaganda', city: 'Karaganda', line1: 'Bukhar Zhyrau Ave, 35', postal: '100000' }
+];
+
 /**
- * Get a random Korean address from the preset list
- * @returns {object} Address object compatible with fill payload
+ * Get a random address based on country code
+ * @param {string} countryCode 'KR', 'IN', 'DZ', 'KZ'
  */
-function getRandomKoreanAddress() {
-  const addr = KOREAN_ADDRESSES[Math.floor(Math.random() * KOREAN_ADDRESSES.length)];
+function getRandomAddress(countryCode = 'KR') {
+  let list = KOREAN_ADDRESSES;
+  if (countryCode === 'IN') list = INDIA_ADDRESSES;
+  else if (countryCode === 'DZ') list = ALGERIA_ADDRESSES;
+  else if (countryCode === 'KZ') list = KAZAKHSTAN_ADDRESSES;
+
+  const addr = list[Math.floor(Math.random() * list.length)];
   return {
     name: addr.name,
     state: addr.state,
     city: addr.city,
     line1: addr.line1,
     line2: '',
-    postal: addr.postal
+    postal: addr.postal,
+    country: countryCode === 'KR' ? 'South Korea' :
+             countryCode === 'IN' ? 'India' :
+             countryCode === 'DZ' ? 'Algeria' :
+             countryCode === 'KZ' ? 'Kazakhstan' : 'South Korea'
   };
+}
+
+/**
+ * Backward compatibility
+ */
+function getRandomKoreanAddress() {
+  return getRandomAddress('KR');
 }
 
 /**
@@ -84,8 +131,12 @@ function getRandomItem(array) {
 // Export — browser/extension context
 if (typeof window !== 'undefined') {
   window.DataGenerator = {
+    getRandomAddress,
     getRandomKoreanAddress,
     KOREAN_ADDRESSES,
+    INDIA_ADDRESSES,
+    ALGERIA_ADDRESSES,
+    KAZAKHSTAN_ADDRESSES,
     getRandomItem
   };
 }
@@ -93,8 +144,12 @@ if (typeof window !== 'undefined') {
 // Service Worker context
 if (typeof self !== 'undefined' && typeof window === 'undefined') {
   self.DataGenerator = {
+    getRandomAddress,
     getRandomKoreanAddress,
     KOREAN_ADDRESSES,
+    INDIA_ADDRESSES,
+    ALGERIA_ADDRESSES,
+    KAZAKHSTAN_ADDRESSES,
     getRandomItem
   };
 }
@@ -102,8 +157,12 @@ if (typeof self !== 'undefined' && typeof window === 'undefined') {
 // Node context
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    getRandomAddress,
     getRandomKoreanAddress,
     KOREAN_ADDRESSES,
+    INDIA_ADDRESSES,
+    ALGERIA_ADDRESSES,
+    KAZAKHSTAN_ADDRESSES,
     getRandomItem
   };
 }

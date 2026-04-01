@@ -1,0 +1,30 @@
+import yaml
+
+data_config = {
+    'path': '/content/captcha_data',
+    'train': 'train/images',
+    'val': 'valid/images',
+    'test': 'test/images',
+    'nc': 57,
+    'names': [
+        'airplane', 'bedroom', 'bicycle', 'bird flying', 'bird on a branch', 'boat', 
+        'bowl of pasta', 'bus', 'butterfly', 'cactus', 'cat with long hair', 
+        'cat with short hair', 'cat-shaped cookie', 'ceiling plant', 'conference room', 
+        'crab on rocks', 'cupcake', 'cymbal', 'daisy', 'dog with a collar', 
+        'dog-shaped cookie', 'duck', 'duck behind rocks', 'elephant', 
+        'fish in the water', 'fish jumping over the water', 'flying bat', 'giraffe', 
+        'guitar', 'hedgehog in bowl', 'hedgehog on grass', 'hedgehog on rocks', 
+        'hedgehog on water', 'horse', 'horse walking', 'horse with white legs', 
+        'ladybug', 'lion', 'lion with closed eyes', 'motorbike', 'motorcycle', 
+        'parrot', 'penguin on rocks', 'piano', 'plant', 'rose', 'rough sea', 
+        'seaplane', 'smiling dog', 'sunflower', 'tall building', 
+        'teacup with a similar porcelain design', 'train', 'truck', 'trumpet', 
+        'tulips', 'violin'
+    ]
+}
+
+with open('/content/captcha_data/data.yaml', 'w') as f:
+    yaml.dump(data_config, f, sort_keys=False, default_flow_style=False)
+
+print("Đã ghi file data.yaml chuẩn bằng thư viện YAML.")
+

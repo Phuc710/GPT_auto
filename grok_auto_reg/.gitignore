@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Environment
+.env
+venv/
+env/
+
+# Data & Output
+accounts.csv
+
+# Chrome Profiles & Temporary Files
+grok_auto_reg_*
+/tmp/grok_auto_reg_*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo

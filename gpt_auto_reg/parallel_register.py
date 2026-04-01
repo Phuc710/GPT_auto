@@ -21,69 +21,65 @@ from gpt_selenium import GPTRegistration, SeleniumException
 from step_tracker import Logger, Color  # Shared colored logger
 
 
+def get_screen_resolution():
+    """Detect screen resolution using tkinter (cross-platform, built-in)"""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        width = root.winfo_screenwidth()
+        height = root.winfo_screenheight()
+        root.destroy()
+        return width, height
+    except Exception:
+        # Fallback to standard HD if detection fails
+        return 1920, 1080
+
+
 class ScreenLayout:
     """Calculate browser window positions for parallel registration"""
     
     @staticmethod
-    def calculate_positions(num_browsers: int, screen_width: int = 1920, screen_height: int = 1080) -> List[Dict[str, int]]:
+    @staticmethod
+    def calculate_positions(num_browsers: int, screen_width: int, screen_height: int) -> List[Dict[str, int]]:
         """
-        Calculate optimal window positions for multiple browsers
-        Returns list of {x, y, width, height} for each browser
+        Calculate optimal window positions for multiple browsers in a grid.
+        Automatically decides columns and rows to maximize space.
         """
         positions = []
         
-        if num_browsers == 1:
-            positions.append({"x": 0, "y": 0, "width": screen_width, "height": screen_height})
-        
-        elif num_browsers == 2:
-            half_width = screen_width // 2
-            positions.append({"x": 0, "y": 0, "width": half_width, "height": screen_height})
-            positions.append({"x": half_width, "y": 0, "width": half_width, "height": screen_height})
-        
-        elif num_browsers == 3:
-            half_width = screen_width // 2
-            half_height = screen_height // 2
-            positions.append({"x": 0, "y": 0, "width": half_width, "height": half_height})
-            positions.append({"x": half_width, "y": 0, "width": half_width, "height": half_height})
-            positions.append({"x": screen_width // 4, "y": half_height, "width": half_width, "height": half_height})
-        
-        elif num_browsers == 4:
-            half_width = int(screen_width / 2)
-            half_height = int(screen_height / 2)
-            # Row 1
-            positions.append({"x": 0, "y": 0, "width": half_width, "height": half_height})
-            positions.append({"x": half_width, "y": 0, "width": half_width, "height": half_height})
-            # Row 2
-            positions.append({"x": 0, "y": half_height, "width": half_width, "height": half_height})
-            positions.append({"x": half_width, "y": half_height, "width": half_width, "height": half_height})
-        
-        elif num_browsers == 6:
-            third_width = screen_width // 3
-            half_height = screen_height // 2
-            for row in range(2):
-                for col in range(3):
-                    positions.append({
-                        "x": col * third_width,
-                        "y": row * half_height,
-                        "width": third_width,
-                        "height": half_height
-                    })
-        
+        # Decide grid structure
+        if num_browsers <= 1:
+            cols, rows = 1, 1
+        elif num_browsers <= 2:
+            cols, rows = 2, 1
+        elif num_browsers <= 4:
+            cols, rows = 2, 2
+        elif num_browsers <= 6:
+            cols, rows = 3, 2
+        elif num_browsers <= 9:
+            cols, rows = 3, 3
         else:
-            cols = min(3, num_browsers)
+            # High count distribution
+            cols = 4
             rows = (num_browsers + cols - 1) // cols
-            cell_width = screen_width // cols
-            cell_height = screen_height // rows
-            
-            for i in range(num_browsers):
-                row = i // cols
-                col = i % cols
-                positions.append({
-                    "x": col * cell_width,
-                    "y": row * cell_height,
-                    "width": cell_width,
-                    "height": cell_height
-                })
+
+        # Reserve space for taskbar (approx 40-60px)
+        usable_height = screen_height - 60
+        
+        cell_width = screen_width // cols
+        cell_height = usable_height // rows
+        
+        gap = 5 # Small gap between windows
+
+        for i in range(num_browsers):
+            row = i // cols
+            col = i % cols
+            positions.append({
+                "x": col * cell_width + gap,
+                "y": row * cell_height + gap,
+                "width": cell_width - (gap * 2),
+                "height": cell_height - (gap * 2)
+            })
         
         return positions
 
@@ -91,11 +87,17 @@ class ScreenLayout:
 class ParallelRegistration:
     """Handle parallel registration with multiple browsers"""
     
-    def __init__(self, num_accounts: int = 3, screen_width: int = 1920, screen_height: int = 1080):
+    def __init__(self, num_accounts: int = 3, screen_width: int = None, screen_height: int = None):
+        if screen_width is None or screen_height is None:
+            detected_w, detected_h = get_screen_resolution()
+            self.screen_width = screen_width or detected_w
+            self.screen_height = screen_height or detected_h
+        else:
+            self.screen_width = screen_width
+            self.screen_height = screen_height
+            
         self.num_accounts = num_accounts
-        self.screen_width = screen_width
-        self.screen_height = screen_height
-        self.positions = ScreenLayout.calculate_positions(num_accounts, screen_width, screen_height)
+        self.positions = ScreenLayout.calculate_positions(num_accounts, self.screen_width, self.screen_height)
         self.results = []
         self.lock = threading.Lock()
     
@@ -122,7 +124,8 @@ class ParallelRegistration:
             
             # Create registration with positioned browser
             reg = GPTRegistration()
-            reg.start(thread_id=index)
+            if not reg.start(thread_id=index):
+                raise SeleniumException("Khong the mo Chrome")
             
             # Position browser window
             try:
@@ -191,6 +194,20 @@ class ParallelRegistration:
                     reg.close()
                 except:
                     pass
+            # Always try to delete the temporary email after use
+            is_success = False
+            if 'account_data' in locals() and account_data and account_data.get('status') == 'success':
+                is_success = True
+
+            if email and email_api:
+                if not is_success:
+                    try:
+                        logger.warning(f"[Thread-{index+1}] Dang xoa email tam thoi do loi (Cleanup): {email}...")
+                        email_api.delete_email(email)
+                    except Exception as e:
+                        logger.debug(f"[Thread-{index+1}] Khong the xoa email: {e}")
+                else:
+                    logger.info(f"[Thread-{index+1}] Done Mail: {email}")
     
     def register_parallel(self, account_storage, logger) -> List[Dict[str, Any]]:
         """Register multiple accounts in parallel"""

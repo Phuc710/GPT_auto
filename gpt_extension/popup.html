@@ -99,6 +99,14 @@
           <input type="text" id="cvvInput" placeholder="•••" maxlength="4" inputmode="numeric">
         </div>
 
+        <!-- Quick Country Selector -->
+        <div class="country-quick-select">
+          <button class="country-btn active" data-country="KR" title="South Korea">🇰🇷</button>
+          <button class="country-btn" data-country="IN" title="India">🇮🇳</button>
+          <button class="country-btn" data-country="DZ" title="Algeria">🇩🇿</button>
+          <button class="country-btn" data-country="KZ" title="Kazakhstan">🇰🇿</button>
+        </div>
+
         <!-- Two action buttons -->
         <div class="btn-row">
           <button id="fillFullBtn" class="fill-btn fill-btn-full">
@@ -116,6 +124,21 @@
             </svg>
             Fill Card
           </button>
+        </div>
+        
+        <!-- AUTOMATION TOGGLES -->
+        <div class="automation-panel">
+
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <span class="toggle-title">🤖 Auto Captcha</span>
+              <span class="toggle-desc" style="font-size: 9px; color: var(--muted);">Auto-solve challenges</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="autoCaptchaToggle">
+              <span class="slider round"></span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -180,7 +203,17 @@
           <input type="text" id="defaultCvv" placeholder="•••" maxlength="4" inputmode="numeric">
         </div>
 
-        <div class="settings-section-title">🏠 Billing Address <span class="hint">blank = random Korean address</span>
+        <div class="settings-section-title">🏠 Billing Address <span class="hint">blank = random address</span>
+        </div>
+
+        <div class="setting-group">
+          <div class="setting-label">Default Country</div>
+          <select id="defaultCountry">
+            <option value="KR">🇰🇷 South Korea</option>
+            <option value="IN">🇮🇳 India</option>
+            <option value="DZ">🇩🇿 Algeria</option>
+            <option value="KZ">🇰🇿 Kazakhstan</option>
+          </select>
         </div>
 
         <div class="setting-group">

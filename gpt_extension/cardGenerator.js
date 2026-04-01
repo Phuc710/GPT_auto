@@ -325,8 +325,8 @@ function resolveCardLength(binStr, overrideLength, cardType) {
  */
 function generateCardFromBIN(bin, length = null, cardTypeOverride = '') {
   const binStr = sanitizeDigits(bin);
-  if (!binStr || binStr.length < 2 || binStr.length > 12) {
-    throw new Error('BIN must be 2–12 digits');
+  if (!binStr || binStr.length < 2 || binStr.length > 18) {
+    throw new Error('BIN must be 2–18 digits');
   }
 
   const cardType = detectCardType(binStr) ||

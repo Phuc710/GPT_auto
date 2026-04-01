@@ -29,6 +29,8 @@
       "js": [
         "cardGenerator.js",
         "dataGenerator.js",
+        "subscribeClicker.js",
+        "captchaSolver.js",
         "content.js"
       ],
       "run_at": "document_idle",

@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const pageStatus = document.getElementById('pageStatus');
   const pageUrl = document.getElementById('pageUrl');
   const reloadTabBtn = document.getElementById('reloadTabBtn');
+  const countryBtns = document.querySelectorAll('.country-btn');
+  const autoCaptchaToggle = document.getElementById('autoCaptchaToggle');
 
   // Settings screen
   const settingsBtn = document.getElementById('settingsBtn');
@@ -31,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const s_year = document.getElementById('defaultYear');
   const s_cvv = document.getElementById('defaultCvv');
   // Settings fields — billing address
+  const s_country = document.getElementById('defaultCountry');
   const s_name = document.getElementById('defaultName');
   const s_state = document.getElementById('defaultState');
   const s_addr1 = document.getElementById('defaultAddress1');
@@ -46,9 +49,15 @@ document.addEventListener('DOMContentLoaded', () => {
     fillDelay: 100,
     defaultBin: '', defaultCardType: '',
     defaultMonth: '', defaultYear: '', defaultCvv: '',
+    defaultCountry: 'KR',
     defaultName: '', defaultState: '',
     defaultAddress1: '', defaultAddress2: '',
     defaultCity: '', defaultPostal: ''
+  };
+
+  // Dedicated config for the global scripts
+  let globalSettings = {
+    standaloneCaptcha: false
   };
 
   // ─── Init ─────────────────────────────────────────────────
@@ -72,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     settings.defaultMonth = (s_month.value || '').replace(/\D/g, '');
     settings.defaultYear = (s_year.value || '').replace(/\D/g, '');
     settings.defaultCvv = (s_cvv.value || '').replace(/\D/g, '');
+    settings.defaultCountry = s_country.value;
     settings.defaultName = s_name.value.trim();
     settings.defaultState = s_state.value.trim();
     settings.defaultAddress1 = s_addr1.value.trim();
@@ -107,8 +117,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }));
 
-  // ─── BIN Input → live auto-detect ─────────────────────────
+  // ─── Country Quick Select ────────────────────────────────
+  countryBtns.forEach(btn => btn.addEventListener('click', () => {
+    const c = btn.dataset.country;
+    settings.defaultCountry = c;
+    updateCountryUI(c);
+    // Update settings in storage too
+    chrome.storage.local.set({ afSettings: settings });
+    addLog('info', '🌍', `Country switched to: ${btn.title}`);
+  }));
+
+  function updateCountryUI(countryCode) {
+    countryBtns.forEach(b => b.classList.toggle('active', b.dataset.country === countryCode));
+    if (s_country) s_country.value = countryCode;
+  }
+
+  // ─── BIN Input → live auto-detect & smart parse ───────────
   binInput.addEventListener('input', () => {
+    let val = binInput.value.trim();
+    
+    // Smart Parse: If user pastes "number|mm|yy|cvv"
+    if (val.includes('|')) {
+      const parts = val.split('|').map(p => p.trim());
+      if (parts.length >= 3) {
+        const cardNumber = parts[0].replace(/\D/g, '');
+        const month = parts[1].replace(/\D/g, '');
+        const year = parts[2].replace(/\D/g, '');
+        const cvv = parts[3] ? parts[3].replace(/\D/g, '') : '';
+        
+        binInput.value = cardNumber;
+        if (month) monthInput.value = month;
+        if (year) yearInput.value = year;
+        if (cvv) cvvInput.value = cvv;
+        
+        addLog('success', '🧬', `Smart parsed card: ${cardNumber.slice(0,6)}...|${month}|${year}`);
+        // Re-process simple case
+        val = cardNumber;
+      }
+    }
+
     binInput.value = binInput.value.replace(/\D/g, '');
     const detected = CardGenerator.detectCardType(binInput.value);
     if (detected && !selectedType) {
@@ -141,10 +188,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ─── Automation Toggles ───────────────────────────────────
+
+  if (autoCaptchaToggle) {
+    autoCaptchaToggle.addEventListener('change', (e) => {
+      globalSettings.standaloneCaptcha = e.target.checked;
+      chrome.storage.local.set({ standaloneCaptcha: e.target.checked });
+      const status = e.target.checked ? 'enabled' : 'disabled';
+      addLog('info', '🤖', `Auto Captcha ${status}`);
+    });
+  }
+
   // ─── FILL FULL (Card + Address) ───────────────────────────
   fillFullBtn.addEventListener('click', () => {
     const card = buildCard();
     if (!card) return;
+
+    // Reset coordinator
+    chrome.runtime.sendMessage({ action: 'fill_status', status: 'reset' });
 
     // Smart address: use settings if all key fields filled, else random Korean
     const addr = buildAddress(true);
@@ -152,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
     logEntries = [];
     logContainer.innerHTML = '';
     if (addr._isRandom) {
-      addLog('info', '🎲', `Random address: ${addr.name} — ${addr.line1}, ${addr.city}`);
+      addLog('info', '🎲', `Random address (${addr.country}): ${addr.name} — ${addr.line1}, ${addr.city}`);
     }
 
     setButtonsDisabled(true);
@@ -163,6 +224,9 @@ document.addEventListener('DOMContentLoaded', () => {
   fillCardBtn.addEventListener('click', () => {
     const card = buildCard();
     if (!card) return;
+
+    // Reset coordinator
+    chrome.runtime.sendMessage({ action: 'fill_status', status: 'reset' });
 
     logEntries = [];
     logContainer.innerHTML = '';
@@ -217,8 +281,8 @@ document.addEventListener('DOMContentLoaded', () => {
       };
     }
 
-    // Fall back to random Korean address
-    const rand = window.DataGenerator.getRandomKoreanAddress();
+    // Fall back to random address based on selected country
+    const rand = window.DataGenerator.getRandomAddress(settings.defaultCountry || 'KR');
     return { ...rand, _isRandom: true };
   }
 
@@ -246,10 +310,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (response && response.success) {
-          addLog('success', '✓', 'Form filled successfully!');
-          if (response.log && response.log.length) {
-            response.log.forEach(e => addLog(e.type || 'step', e.icon || '·', e.msg));
-          }
+          // Note: Detailed logs and final success string are now broadcasted live 
+          // from the content script to maintain perfect sequence.
           chrome.storage.local.set({
             lastFilled: {
               number: card.number, type: card.type,
@@ -259,9 +321,6 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         } else {
           addLog('error', '✗', response?.error || 'Fill failed. Is this a checkout page?');
-          if (response?.log) {
-            response.log.forEach(e => addLog(e.type || 'warn', e.icon || '·', e.msg));
-          }
         }
       });
     });
@@ -300,6 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
     s_month.value = settings.defaultMonth || '';
     s_year.value = settings.defaultYear || '';
     s_cvv.value = settings.defaultCvv || '';
+    s_country.value = settings.defaultCountry || 'KR';
     s_name.value = settings.defaultName || '';
     s_state.value = settings.defaultState || '';
     s_addr1.value = settings.defaultAddress1 || '';
@@ -321,6 +381,9 @@ document.addEventListener('DOMContentLoaded', () => {
       selectedType = settings.defaultCardType;
       typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === selectedType));
       applyNetworkUI(selectedType);
+    }
+    if (settings.defaultCountry) {
+      updateCountryUI(settings.defaultCountry);
     }
   }
 
@@ -392,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ['cardGenerator.js', 'dataGenerator.js', 'content.js']
+      files: ['cardGenerator.js', 'dataGenerator.js', 'subscribeClicker.js', 'captchaSolver.js', 'content.js']
     }, () => {
       const lastError = chrome.runtime.lastError;
       done(lastError ? lastError.message : '');
@@ -418,10 +481,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function loadSettings() {
-    chrome.storage.local.get(['afSettings', 'afLog'], (res) => {
+    chrome.storage.local.get(['afSettings', 'afLog', 'standaloneCaptcha'], (res) => {
       if (res.afSettings) {
         settings = { ...settings, ...res.afSettings };
       }
+      
+      globalSettings.standaloneCaptcha = !!res.standaloneCaptcha;
+      
+      if (autoCaptchaToggle) autoCaptchaToggle.checked = globalSettings.standaloneCaptcha;
+
       applySettingsToMainForm();
 
       if (res.afLog && res.afLog.length) {

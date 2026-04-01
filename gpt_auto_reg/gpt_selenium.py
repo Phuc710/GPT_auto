@@ -1,10 +1,15 @@
 # gpt_selenium.py - Selenium automation for ChatGPT registration
 
+import json
 import time
 import sys
 import random
 import os
+import re
 import shutil
+import subprocess
+import tempfile
+import threading
 from typing import Optional
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -13,7 +18,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 
 from config import WAIT_TIME, DEFAULT_PASSWORD, USE_ANTI_DETECT, RANDOM_DELAYS, MIN_DELAY_MS, MAX_DELAY_MS
-from anti_detect import get_random_user_agent, random_delay, random_scroll
+from anti_detect import get_random_user_agent, random_delay, random_scroll, random_typing_delay
 from step_tracker import Logger  # Shared logger with colored output
 
 
@@ -194,71 +199,147 @@ class DriverManager:
     """Manage Chrome driver initialization"""
     
     _port_counter = 9500  # Starting port for multiple browsers
-    _port_lock = None  # Will be initialized in create_driver
+    _port_lock = threading.Lock()
+    _driver_init_lock = threading.Lock()
+    _browser_version_main = None
+    _browser_executable_path = None
     
     @staticmethod
     def _get_next_port():
         """Get next available port for browser"""
-        import threading
-        if DriverManager._port_lock is None:
-            DriverManager._port_lock = threading.Lock()
-        
         with DriverManager._port_lock:
             port = DriverManager._port_counter
             DriverManager._port_counter += 1
             if DriverManager._port_counter > 9600:
                 DriverManager._port_counter = 9500
             return port
-    
+
     @staticmethod
-    def create_driver(thread_id: int = 0):
-        """Initialize undetected Chrome driver with anti-detection and unique port"""
+    def _detect_browser_executable() -> Optional[str]:
+        """Locate the local Chrome executable once and cache it."""
+        if DriverManager._browser_executable_path:
+            return DriverManager._browser_executable_path
+
+        try:
+            browser_path = uc.find_chrome_executable()
+            if browser_path and os.path.exists(browser_path):
+                DriverManager._browser_executable_path = browser_path
+        except Exception as e:
+            Logger.warning(f"Could not detect Chrome executable automatically: {e}")
+
+        return DriverManager._browser_executable_path
+
+    @staticmethod
+    def _detect_browser_version_main() -> Optional[int]:
+        """Read installed Chrome major version so ChromeDriver matches the browser."""
+        if DriverManager._browser_version_main is not None:
+            return DriverManager._browser_version_main
+
+        browser_path = DriverManager._detect_browser_executable()
+        if not browser_path:
+            return None
+
+        if os.name == "nt":
+            try:
+                safe_browser_path = browser_path.replace("'", "''")
+                ps_command = (
+                    "(Get-Item "
+                    f"'{safe_browser_path}'"
+                    ").VersionInfo.ProductVersion"
+                )
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_command],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                version_text = (result.stdout or result.stderr or "").strip()
+                match = re.search(r"(\d+)\.", version_text)
+                if match:
+                    DriverManager._browser_version_main = int(match.group(1))
+            except Exception as e:
+                Logger.warning(f"Could not detect Chrome version via PowerShell: {e}")
+
+        if DriverManager._browser_version_main is None:
+            try:
+                result = subprocess.run(
+                    [browser_path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                version_text = (result.stdout or result.stderr or "").strip()
+                match = re.search(r"(\d+)\.", version_text)
+                if match:
+                    DriverManager._browser_version_main = int(match.group(1))
+            except Exception as e:
+                Logger.warning(f"Could not detect Chrome version via CLI: {e}")
+
+        return DriverManager._browser_version_main
+
+    @staticmethod
+    def _build_options(thread_id: int = 0):
+        """Build a fresh ChromeOptions object for each driver creation attempt."""
         options = uc.ChromeOptions()
-        
+        port = DriverManager._get_next_port()
+        profile_dir = tempfile.mkdtemp(prefix=f"gpt_auto_reg_{thread_id}_{port}_")
+
         # Use random User-Agent if anti-detect enabled
         if USE_ANTI_DETECT:
             user_agent = get_random_user_agent()
-            Logger.info(f"Using random User-Agent")
         else:
             # Default fallback if anti-detect is disabled
             user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        
+
         options.add_argument(f"user-agent={user_agent}")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--window-size=1280,800")
-        
-        # Use unique port and user data dir for each thread to avoid conflicts
-        port = DriverManager._get_next_port() + thread_id
-        _home = os.path.expanduser("~")
-        user_data_dir = os.path.join(_home, "AppData", "Local", "Google", "Chrome", "User Data", f"Profile_{port}")
-        # Clear specific profile data before starting to ensure a fresh session
-        if os.path.exists(user_data_dir):
-            try:
-                # Close any existing chrome processes that might be using this dir
-                shutil.rmtree(user_data_dir, ignore_errors=True)
-                Logger.info(f"Cleared browser profile: {port}")
-            except Exception as e:
-                Logger.warning(f"Could not clear profile: {e}")
-
-        options.add_argument(f"--user-data-dir={user_data_dir}")
+        options.add_argument(f"--user-data-dir={profile_dir}")
         options.add_argument(f"--remote-debugging-port={port}")
-        
-        # Proxy logic removed as per user request
-        
-        # Initialize driver
-        try:
-            driver = uc.Chrome(options=options, headless=False, version_main=144)
-        except Exception as e:
-            Logger.warning(f"Starting driver with older version: {e}")
+        return options, profile_dir
+    
+    @staticmethod
+    def create_driver(thread_id: int = 0):
+        """Initialize undetected Chrome driver with anti-detection and unique port."""
+        version_main = DriverManager._detect_browser_version_main()
+        browser_path = DriverManager._detect_browser_executable()
+
+        # Serialize uc.Chrome startup to avoid concurrent binary patching on Windows.
+        with DriverManager._driver_init_lock:
+            profile_dir = None
             try:
-                driver = uc.Chrome(options=options, headless=False)
-            except Exception as e2:
-                Logger.error(f"Cannot start browser: {e2}")
+                options, profile_dir = DriverManager._build_options(thread_id=thread_id)
+                driver = uc.Chrome(
+                    options=options,
+                    headless=False,
+                    version_main=version_main,
+                    browser_executable_path=browser_path,
+                    use_subprocess=True,
+                )
+                driver._gpt_profile_dir = profile_dir
+                return driver
+            except Exception as first_error:
+                Logger.warning(f"Primary driver startup failed: {first_error}")
+
+            try:
+                options, profile_dir = DriverManager._build_options(thread_id=thread_id)
+                driver = uc.Chrome(
+                    options=options,
+                    headless=False,
+                    browser_executable_path=browser_path,
+                    use_subprocess=True,
+                )
+                driver._gpt_profile_dir = profile_dir
+                return driver
+            except Exception as second_error:
+                if profile_dir and os.path.isdir(profile_dir):
+                    shutil.rmtree(profile_dir, ignore_errors=True)
+                Logger.error(f"Cannot start browser: {second_error}")
                 return None
-        
-        return driver
 
 
 # ============ GPT REGISTRATION ============
@@ -286,6 +367,61 @@ class GPTRegistration:
             return True
         except Exception as e:
             Logger.error(f"Cannot start browser: {e}")
+            return False
+
+    def _fast_fill_input(self, element, value: str, label: str = "field") -> bool:
+        """Type quickly with human-like cadence, then fallback to JS if needed."""
+        typed = False
+        try:
+            element.click()
+        except Exception:
+            pass
+
+        try:
+            element.clear()
+        except Exception:
+            pass
+
+        try:
+            for char in value:
+                element.send_keys(char)
+                random_typing_delay()
+            typed = True
+            current_value = (element.get_attribute("value") or "").strip()
+            if current_value == value:
+                Logger.debug(f"Typed {label} with fast human cadence")
+                return True
+        except Exception as send_keys_error:
+            Logger.debug(f"send_keys typing failed for {label}: {send_keys_error}")
+
+        try:
+            self.driver.execute_script(
+                """
+                const el = arguments[0];
+                const val = arguments[1];
+                el.focus();
+                const proto = Object.getPrototypeOf(el);
+                const descriptor = Object.getOwnPropertyDescriptor(proto, 'value')
+                    || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+                    || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+                if (descriptor && descriptor.set) {
+                    descriptor.set.call(el, val);
+                } else {
+                    el.value = val;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                """,
+                element,
+                value,
+            )
+            Logger.debug(f"Filled {label} via JS fallback")
+            return True
+        except Exception as js_error:
+            Logger.warning(f"Could not fill {label}: {js_error}")
+            if typed:
+                current_value = (element.get_attribute("value") or "").strip()
+                return current_value == value
             return False
     
     def go_to_signup(self) -> bool:
@@ -391,16 +527,9 @@ class GPTRegistration:
             
             # Find and clear email input
             email_input = self.driver.find_element(By.ID, "email")
-            email_input.clear()
-            
-            # Type email character by character if anti-detect enabled
-            if USE_ANTI_DETECT:
-                from anti_detect import random_typing_delay
-                for char in email:
-                    email_input.send_keys(char)
-                    random_typing_delay()
-            else:
-                email_input.send_keys(email)
+            if not self._fast_fill_input(email_input, email, "email"):
+                Logger.error("Email input not found")
+                return False
             
             Logger.info(f"Đã nhập email: {email}")
             time.sleep(self.timing.get_action_delay("after_click"))
@@ -475,16 +604,9 @@ class GPTRegistration:
             
             # Find and clear password input
             password_input = self.driver.find_element(By.XPATH, "//input[@type='password']")
-            password_input.clear()
-            
-            # Human-like typing
-            if USE_ANTI_DETECT:
-                from anti_detect import random_typing_delay
-                for char in self.password:
-                    password_input.send_keys(char)
-                    random_typing_delay()
-            else:
-                password_input.send_keys(self.password)
+            if not self._fast_fill_input(password_input, self.password, "password"):
+                Logger.error("Password input not found")
+                return False
                 
             Logger.info("Đã nhập mật khẩu")
             time.sleep(self.timing.get_action_delay("after_click"))
@@ -562,8 +684,8 @@ class GPTRegistration:
                         continue
                     
                     code_input = self.driver.find_element(By.XPATH, selector)
-                    code_input.clear()
-                    code_input.send_keys(code)
+                    if not self._fast_fill_input(code_input, code, "verification code"):
+                        continue
                     Logger.info(f"Đã nhập mã: {code}")
                     time.sleep(self.timing.get_action_delay("after_click"))
                     
@@ -844,39 +966,80 @@ class GPTRegistration:
         Returns a dict with the extracted data (empty dict on failure).
         """
         SESSION_URL = "https://chatgpt.com/api/auth/session"
+        original_url = ""
+
+        def _session_from_cookies() -> dict:
+            try:
+                result = {}
+                for cookie in self.driver.get_cookies():
+                    if cookie.get("name") == "__Secure-next-auth.session-token":
+                        result["session_token"] = cookie.get("value", "")
+                return result
+            except Exception:
+                return {}
+
+        def _normalize_session_payload(data: dict) -> dict:
+            user = data.get("user") or {}
+            account = data.get("account") or {}
+            cookie_data = _session_from_cookies()
+            return {
+                "access_token": data.get("accessToken") or data.get("access_token", ""),
+                "session_token": data.get("sessionToken") or data.get("session_token") or cookie_data.get("session_token", ""),
+                "expires": data.get("expires", ""),
+                "user_id": user.get("id") or data.get("user_id", ""),
+                "account_id": account.get("id") or user.get("accountId") or data.get("account_id", ""),
+                "plan_type": account.get("planType") or user.get("planType") or data.get("plan_type", ""),
+                "org_id": account.get("organizationId") or user.get("organizationId") or data.get("org_id", ""),
+            }
+
         try:
             Logger.sub(f"Đang lấy session từ {SESSION_URL}")
-            self.driver.get(SESSION_URL)
-            time.sleep(2)
+            original_url = self.driver.current_url
 
-            # The page renders JSON directly
-            body = self.driver.find_element(By.TAG_NAME, "body").text
-            import json as _json
-            data = _json.loads(body)
+            for attempt in range(1, 6):
+                self.driver.get(SESSION_URL)
+                time.sleep(1.5 + (attempt * 0.5))
 
-            result = {
-                "access_token":   data.get("accessToken", ""),
-                "session_token":  data.get("sessionToken", ""),
-                "expires":        data.get("expires", ""),
-                "user_id":        data.get("user", {}).get("id", ""),
-                "account_id":     data.get("account", {}).get("id", ""),
-                "plan_type":      data.get("account", {}).get("planType", ""),
-                "org_id":         data.get("account", {}).get("organizationId", ""),
-            }
-            Logger.sub(f"Session OK | plan={result['plan_type']} | expires={result['expires'][:10]}")
-            return result
+                body = self.driver.find_element(By.TAG_NAME, "body").text.strip()
+                if not body or body.startswith("<html"):
+                    Logger.debug(f"Session body not ready on attempt {attempt}")
+                    continue
+
+                try:
+                    data = json.loads(body)
+                except json.JSONDecodeError:
+                    Logger.debug(f"Session body is not JSON on attempt {attempt}: {body[:80]}")
+                    continue
+
+                if not isinstance(data, dict):
+                    Logger.debug(f"Unexpected session payload type on attempt {attempt}")
+                    continue
+
+                result = _normalize_session_payload(data)
+                if result.get("access_token") or result.get("session_token") or result.get("user_id"):
+                    Logger.sub(
+                        f"Session OK | plan={result.get('plan_type', '')} | "
+                        f"expires={result.get('expires', '')[:10]}"
+                    )
+                    return result
+
+                Logger.debug(f"Session payload empty on attempt {attempt}: {body[:120]}")
 
         except Exception as e:
             Logger.warning(f"fetch_session failed: {e}")
-            # Fallback: extract session token from cookies
+        finally:
             try:
-                cookies = self.driver.get_cookies()
-                for c in cookies:
-                    if c["name"] == "__Secure-next-auth.session-token":
-                        return {"session_token": c["value"]}
+                if original_url:
+                    self.driver.get(original_url)
+                    time.sleep(1)
             except Exception:
                 pass
-            return {}
+
+        cookie_fallback = _session_from_cookies()
+        if cookie_fallback:
+            Logger.warning("Session endpoint chua day du, fallback sang cookie")
+            return cookie_fallback
+        return {}
     
     def get_account_data(self) -> dict:
         """
@@ -917,8 +1080,11 @@ class GPTRegistration:
         """Close browser"""
         try:
             if self.driver:
+                profile_dir = getattr(self.driver, "_gpt_profile_dir", None)
                 self.driver.quit()
                 Logger.info("Đã đóng trình duyệt")
+                if profile_dir and os.path.isdir(profile_dir):
+                    shutil.rmtree(profile_dir, ignore_errors=True)
         except Exception as e:
             Logger.warning(f"Error closing browser: {e}")
 

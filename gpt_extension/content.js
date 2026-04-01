@@ -4,676 +4,414 @@
 
 'use strict';
 
-const fillLog = [];
+if (window.__afLoaded) {
+  console.log('[AutoFill] Content script already active. Skipping duplicate listener.');
+} else {
+  (function() {
+    window.__afLoaded = true;
 
-function logStep(type, icon, msg) {
-  fillLog.push({ type, icon, msg });
-  console.log(`[AutoFill] ${icon} ${msg}`);
+    const fillLog = [];
 
-  // Broadcast log to popup for real-time visibility
-  chrome.runtime.sendMessage({
-    action: 'log_step',
-    type,
-    icon,
-    msg
-  }).catch(() => { });
-}
+    function logStep(type, icon, msg) {
+      fillLog.push({ type, icon, msg });
+      console.log(`[AutoFill] ${icon} ${msg}`);
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action !== 'fillForm') return undefined;
+      // Broadcast log to popup for real-time visibility
+      if (chrome.runtime?.id) {
+        try {
+          chrome.runtime.sendMessage({
+            action: 'log_step',
+            type,
+            icon,
+            msg
+          }).catch(() => { });
+        } catch (e) {
+          // Context invalidated, ignore silently
+        }
+      }
+    }
 
-  const isTop = (window === window.top);
-  const delay = request.fillDelay || 100;
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action !== 'fillForm') return undefined;
 
-  if (!isTop) {
-    // ── SUB-FRAME (Stripe, etc.): fill card + address fields ──
-    // ChatGPT embeds billing address fields INSIDE the Stripe iframe!
-    // Don't sendResponse — only top frame responds to popup.
-    fillCardFieldsInFrame(request.cardData, request.address || {}, delay).catch(() => { });
-    return false;
-  }
+      const isTop = (window === window.top);
+      const delay = request.fillDelay || 100;
 
-  // ── TOP FRAME: fill address + respond to popup ──
-  fillLog.length = 0;
-  const address = request.address || {};
+      if (!isTop) {
+        // ── SUB-FRAME (Stripe, etc.): fill card + address fields ──
+        fillCardFieldsInFrame(request.cardData, request.address || {}, delay).catch(() => { });
+        return false;
+      }
 
-  fillTopFrame(request.cardData, delay, address)
-    .then(() => sendResponse({ success: true, log: [...fillLog] }))
-    .catch((err) => {
-      logStep('error', '✗', `Fatal: ${err.message}`);
-      sendResponse({ success: false, error: err.message, log: [...fillLog] });
+      // ── TOP FRAME: fill address + respond to popup ──
+      fillLog.length = 0;
+      const address = request.address || {};
+
+      fillTopFrame(request.cardData, delay, address)
+        .then(() => {
+          sendResponse({ success: true, log: [...fillLog] });
+          // Note: performSubscribe is now triggered by 'all_fills_complete' message from background
+        })
+        .catch((err) => {
+          logStep('error', '✗', `Fatal: ${err.message}`);
+          sendResponse({ success: false, error: err.message, log: [...fillLog] });
+        });
+
+      return true; // keep channel open for async sendResponse
     });
 
-  return true; // keep channel open for async sendResponse
-});
-
-// ═════════════════════════════════════════════════════════════
-// TOP FRAME: fills billing address fields in its own document
-// ═════════════════════════════════════════════════════════════
-async function fillTopFrame(cardData, delay, address) {
-  const stepDelay = Math.max(delay, 220);
-
-  // Check hasAddress — ignore internal _isRandom / _source keys
-  const addrValues = Object.entries(address || {})
-    .filter(([k]) => !k.startsWith('_'))
-    .map(([, v]) => v);
-  const hasAddress = addrValues.some(v => v && v !== false);
-
-  // Also try to find card fields in own document (rare but possible)
-  const fields = scanPaymentFields();
-  const anyCard = fields.cardNumberField || fields.combinedExpiryField ||
-    fields.expiryMonthField || fields.expiryYearField || fields.cvvField;
-
-  if (anyCard) {
-    await fillCardFields(cardData, fields, stepDelay);
-  }
-
-  if (hasAddress) {
-    await fillBillingAddress(address, stepDelay);
-  }
-}
-
-// ═════════════════════════════════════════════════════════════
-// SUB-FRAME: fills card + billing address in its own document
-// ChatGPT uses 2 SEPARATE Stripe iframes:
-//   - elements-inner-payment-*.html  → card fields only
-//   - elements-inner-address-*.html  → billing address only
-// Both receive the fillForm message, each fills what it has.
-// ═════════════════════════════════════════════════════════════
-async function fillCardFieldsInFrame(cardData, address, delay) {
-  const stepDelay = Math.max(delay, 220);
-
-  const addrValues = Object.entries(address || {})
-    .filter(([k]) => !k.startsWith('_'))
-    .map(([, v]) => v);
-  const hasAddress = addrValues.some(v => v && v !== false);
-
-  // ── Try card fields ──
-  let fields = scanPaymentFields();
-  if (!hasAnyPaymentField(fields)) {
-    // Wait once — Stripe fields may load late
-    await sleep(stepDelay);
-    fields = scanPaymentFields();
-  }
-
-  const hasCard = hasAnyPaymentField(fields);
-
-  if (hasCard) {
-    await fillCardFields(cardData, fields, stepDelay);
-    if (hasAddress) {
-      await fillBillingAddress(address, stepDelay);
-    }
-    logStep('info', '✅', `Done — ${window.location.origin}`);
-    return;
-  }
-
-  // ── No card fields: might be the ADDRESS iframe ──
-  if (hasAddress) {
-    const nameField = await waitForField(
-      ['#billingAddress-nameInput', '[name="name"]', '[autocomplete="billing name"]'],
-      ['full name', 'name'], stepDelay
-    );
-    if (nameField) {
-      await fillBillingAddress(address, stepDelay);
-      logStep('info', '✅', `Done — ${window.location.origin}`);
-      return;
-    }
-  }
-}
-
-// ═════════════════════════════════════════════════════════════
-// SHARED: fill card fields from a scan result
-// ═════════════════════════════════════════════════════════════
-async function fillCardFields(cardData, fields, stepDelay) {
-  const { cardNumberField, combinedExpiryField, expiryMonthField, expiryYearField, cvvField } = fields;
-
-  const month = cardData.expiry?.month || cardData.month;
-  const year = cardData.expiry?.year || cardData.year;
-  const yearShort = cardData.expiry?.yearShort || String(year).slice(-2);
-
-  if (cardNumberField) {
-    await fillField(cardNumberField, cardData.number || '', stepDelay);
-    logStep('success', '💳', `PAN: ${cardData.number?.replace(/\s/g, '').replace(/(\d{4})/g, '$1 ').trim().replace(/\d{4} \d{4} \d{4} (\d{4})/, '•••• •••• •••• $1')}`);
-  }
-
-  if (combinedExpiryField) {
-    const expiryValue = formatExpiryForField(combinedExpiryField, month, year, yearShort);
-    await fillField(combinedExpiryField, expiryValue, stepDelay);
-    logStep('success', '📅', `Expiry: ${expiryValue}`);
-  } else {
-    if (expiryMonthField) {
-      await fillField(expiryMonthField, month, stepDelay);
-    }
-    if (expiryYearField) {
-      await fillField(expiryYearField, year, yearShort, stepDelay);
-    }
-    if (expiryMonthField || expiryYearField) {
-      logStep('success', '📅', `Expiry: ${month}/${yearShort}`);
-    }
-  }
-
-  if (cvvField) {
-    await fillField(cvvField, cardData.cvv || '', stepDelay);
-    logStep('success', '🔒', `CVV: ${cardData.cvv || ''}`);
-  }
-}
-
-// ═════════════════════════════════════════════════════════════
-// BILLING ADDRESS (top frame only)
-// ═════════════════════════════════════════════════════════════
-async function fillBillingAddress(address, delay) {
-  // 5. 👤 Name → 6. 🗺 State → 7. 🏙 City → 8. 🏠 Addr1 → Addr2 → 📮 Postal
-
-  // ── Name ──
-  const nameSelectors = [
-    // ChatGPT / Stripe billing form
-    '#billingAddress-nameInput',
-    'input[data-testid="billing-name"]',
-    'input[name="billingName"]',
-    'input[name="billing_name"]',
-    'input[name="name_on_card"]',
-    'input[name="nameOnCard"]',
-    'input[name="cardholder"]',
-    'input[name="cardholder_name"]',
-    'input[name="cardholderName"]',
-    // Generic
-    'input[autocomplete="cc-name"]',
-    'input[autocomplete="billing name"]',
-    'input[autocomplete="name"]',
-    'input[name="name"]',
-    'input[id*="name" i][type="text"]',
-    'input[placeholder*="full name" i]',
-    'input[placeholder*="cardholder" i]',
-    'input[placeholder*="name on card" i]',
-    'input[placeholder*="card holder" i]',
-    'input[placeholder*="name" i]',
-    'input[aria-label*="name" i]',
-  ];
-  const nameField = await waitForField(nameSelectors, ['full name', 'name on card', 'cardholder', 'billing name', 'name'], delay);
-  if (nameField && address.name) {
-    await fillField(nameField, address.name, delay);
-    logStep('success', '👤', `Name: ${address.name}`);
-  }
-
-  // ── State / Province (Do Si) ──
-  const stateField = findField([
-    '#billingAddress-administrativeAreaInput',
-    'select[autocomplete="billing address-level1"]',
-    'select[autocomplete="address-level1"]',
-    'select[name="administrativeArea"]',
-    'select[name="state"]',
-    'select[name="province"]',
-    'select[id*="state" i]',
-    'input[autocomplete="address-level1"]',
-    'input[name="state"]',
-    'input[name="province"]',
-    'input[id*="state" i]',
-    '#state',
-  ], ['state', 'province', 'region', 'do si']);
-  if (stateField && address.state) {
-    if (stateField.tagName === 'SELECT') {
-      const opts = Array.from(stateField.options);
-      const match = opts.find((opt) =>
-        opt.value.toLowerCase() === address.state.toLowerCase() ||
-        opt.textContent.toLowerCase().includes(address.state.toLowerCase())
-      );
-      if (match) {
-        await fillField(stateField, match.value, delay);
-        logStep('success', '🗺', `State: ${address.state}`);
+    // Listen for the "All frames done" signal from background
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.action === 'all_fills_complete' && window === window.top) {
+        logStep('success', '✓', 'Form filled successfully!');
+        if (window.performSubscribe) {
+          setTimeout(() => window.performSubscribe(), 300);
+        }
       }
-    } else {
-      await fillField(stateField, address.state, delay);
-      logStep('success', '🗺', `State: ${address.state}`);
-    }
-  }
+    });
 
-  // ── City ──
-  const cityField = await waitForField([
-    '#billingAddress-localityInput',
-    'input[autocomplete="billing locality"]',
-    'input[autocomplete="address-level2"]',
-    'input[name="city"]',
-    'input[name="locality"]',
-    'input[id*="city" i]',
-    'input[placeholder*="city" i]',
-    'input[aria-label*="city" i]',
-    '#city',
-  ], ['city', 'town', 'locality'], delay);
-  if (cityField && address.city) {
-    await fillField(cityField, address.city, delay);
-    logStep('success', '🏙', `City: ${address.city}`);
-  }
-
-  // ── Address Line 1 ──
-  const addr1Field = await waitForField([
-    '#billingAddress-addressLine1Input',
-    'input[autocomplete="billing street-address"]',
-    'input[autocomplete="address-line1"]',
-    'input[name="addressLine1"]',
-    'input[name="address_line_1"]',
-    'input[name="address1"]',
-    'input[name="street"]',
-    'input[name="street_address"]',
-    'input[id*="address" i][id*="1"]',
-    'input[placeholder*="address line 1" i]',
-    'input[placeholder*="street address" i]',
-    'input[placeholder*="address" i]',
-    'input[aria-label*="address line 1" i]',
-  ], ['address line 1', 'address 1', 'street address', 'street'], delay);
-  if (addr1Field && address.line1) {
-    await fillField(addr1Field, address.line1, delay);
-    logStep('success', '🏠', `Addr 1: ${address.line1}`);
-  }
-
-  // ── Address Line 2 ──
-  const addr2Field = findField([
-    '#billingAddress-addressLine2Input',
-    'input[autocomplete="address-line2"]',
-    'input[autocomplete="billing address-line2"]',
-    'input[name="addressLine2"]',
-    'input[name="address_line_2"]',
-    'input[name="address2"]',
-    'input[placeholder*="address line 2" i]',
-    'input[placeholder*="apt" i]',
-    'input[placeholder*="suite" i]',
-    'input[aria-label*="address line 2" i]',
-  ], ['address line 2', 'address 2', 'apt', 'suite', 'unit']);
-  if (addr2Field && address.line2) {
-    await fillField(addr2Field, address.line2, delay);
-    logStep('success', '🏠', `Addr 2: ${address.line2}`);
-  }
-
-  // ── Postal Code ──
-  const postalField = await waitForField([
-    '#billingAddress-postalCodeInput',
-    'input[autocomplete="billing postal-code"]',
-    'input[autocomplete="postal-code"]',
-    'input[name="postalCode"]',
-    'input[name="postal_code"]',
-    'input[name="zip"]',
-    'input[name="zipcode"]',
-    'input[id*="postal" i]',
-    'input[id*="zip" i]',
-    'input[placeholder*="postal" i]',
-    'input[placeholder*="zip" i]',
-    'input[aria-label*="postal" i]',
-    'input[aria-label*="zip" i]',
-    '#postal', '#zip',
-  ], ['postal code', 'zip code', 'zip', 'postal'], delay);
-  if (postalField && address.postal) {
-    await fillField(postalField, address.postal, delay);
-    logStep('success', '📮', `Postal: ${address.postal}`);
-  }
-}
-
-// ═════════════════════════════════════════════════════════════
-// FIELD SCANNING
-// ═════════════════════════════════════════════════════════════
-function hasAnyPaymentField(fields) {
-  return Boolean(
-    fields.cardNumberField ||
-    fields.expiryMonthField ||
-    fields.expiryYearField ||
-    fields.combinedExpiryField ||
-    fields.cvvField
-  );
-}
-
-function shouldUseCombinedExpiryField(monthField, yearField, combinedField) {
-  if (combinedField) return true;
-  if (monthField && yearField && monthField === yearField) return true;
-  if (looksLikeCombinedExpiryField(monthField)) return true;
-  if (looksLikeCombinedExpiryField(yearField)) return true;
-  return false;
-}
-
-function looksLikeCombinedExpiryField(field) {
-  if (!field) return false;
-  const text = [
-    field.id || '', field.name || '',
-    field.getAttribute('placeholder') || '',
-    field.getAttribute('aria-label') || '',
-    field.getAttribute('autocomplete') || '',
-    getAssociatedLabelText(field)
-  ].join(' ').toLowerCase();
-
-  return /mm\s*\/\s*yy/.test(text) ||
-    /mm\s*\/\s*yyyy/.test(text) ||
-    /expir/.test(text) ||
-    /payment-expiryinput/.test(text);
-}
-
-function scanPaymentFields() {
-  return {
-    cardNumberField: findField([
-      'input[data-elements-stable-field-name="cardNumber"]',
-      '#payment-numberInput',
-      'input[id*="numberInput" i]',
-      'input[class*="CardNumberInput" i]',
-      'input[class*="cardNumber" i]',
-      'input[autocomplete="cc-number"]',
-      'input[name="number"]',
-      'input[name*="cardnumber" i]',
-      'input[name*="card_number" i]',
-      'input[name*="ccnumber" i]',
-      'input[name*="cc_number" i]',
-      'input[name*="pan" i]',
-      'input[placeholder*="1234 1234 1234" i]',
-      'input[placeholder*="card number" i]',
-      'input[placeholder*="credit card" i]',
-      'input[placeholder*="debit card" i]',
-      'input[id*="cardnumber" i]',
-      'input[id*="card_number" i]',
-      'input[id*="card-number" i]',
-      'input[id*="ccnumber" i]',
-      'input[id*="creditcard" i]',
-      'input[data-testid*="card" i]',
-      'input[data-cy*="card" i]',
-      'input[aria-label*="card number" i]',
-      '#cardNumber', '#card_number', '#ccNumber', '#cc_number',
-      '#cardnumber', '#card-number', '#credit-card-number'
-    ], ['card number', 'credit card', 'pan', 'card no']),
-
-    expiryMonthField: findField([
-      'select[name*="expmonth" i]', 'select[name*="exp_month" i]',
-      'select[name*="card_month" i]', 'select[name*="month" i]',
-      'input[name*="expmonth" i]', 'input[name*="exp_month" i]',
-      'input[name*="cardmonth" i]', 'input[name*="month" i]',
-      'select[id*="expmonth" i]', 'select[id*="exp_month" i]',
-      'select[id*="month" i]',
-      'input[placeholder*="mm" i][maxlength="2"]',
-      'input[aria-label*="expiry month" i]',
-      '#expiryMonth', '#expMonth', '#cardMonth', '#month'
-    ], ['month', 'mm', 'exp month', 'expiry month']),
-
-    expiryYearField: findField([
-      'select[name*="expyear" i]', 'select[name*="exp_year" i]',
-      'select[name*="card_year" i]', 'select[name*="year" i]',
-      'input[name*="expyear" i]', 'input[name*="exp_year" i]',
-      'input[name*="cardyear" i]', 'input[name*="year" i]',
-      'select[id*="expyear" i]', 'select[id*="exp_year" i]',
-      'select[id*="year" i]',
-      'input[aria-label*="expiry year" i]',
-      '#expiryYear', '#expYear', '#cardYear', '#year'
-    ], ['year', 'yy', 'exp year', 'expiry year']),
-
-    combinedExpiryField: findField([
-      'input[data-elements-stable-field-name="cardExpiry"]',
-      '#payment-expiryInput',
-      'input[id*="expiryInput" i]',
-      'input[class*="CardExpiryInput" i]',
-      'input[autocomplete="cc-exp"]',
-      'input[name*="expiry" i]', 'input[name*="expdate" i]',
-      'input[name*="exp-date" i]', 'input[name*="card_exp" i]',
-      'input[placeholder*="mm/yy" i]', 'input[placeholder*="mm / yy" i]',
-      'input[placeholder*="mm/yyyy" i]',
-      'input[placeholder*="expiry" i]', 'input[placeholder*="expiration" i]',
-      'input[id*="expiry" i]', 'input[id*="expdate" i]',
-      'input[aria-label*="expiration" i]', 'input[aria-label*="expiry" i]',
-      'input[data-testid*="expiry" i]',
-      '#expiry', '#expiryDate', '#expDate', '#cardExpiry'
-    ], ['expiry', 'expiration', 'mm / yy', 'mm/yy']),
-
-    cvvField: findField([
-      'input[data-elements-stable-field-name="cardCvc"]',
-      '#payment-cvcInput',
-      'input[id*="cvcInput" i]',
-      'input[class*="CardCvcInput" i]',
-      'input[autocomplete="cc-csc"]',
-      'input[name*="cvv" i]', 'input[name*="cvc" i]',
-      'input[name*="cvv2" i]', 'input[name*="csc" i]',
-      'input[name*="security_code" i]', 'input[name*="securitycode" i]',
-      'input[placeholder*="cvv" i]', 'input[placeholder*="cvc" i]',
-      'input[placeholder*="security" i]',
-      'input[id*="cvv" i]', 'input[id*="cvc" i]', 'input[id*="security" i]',
-      'input[aria-label*="cvv" i]', 'input[aria-label*="cvc" i]',
-      'input[aria-label*="security code" i]',
-      'input[data-testid*="cvv" i]',
-      '#cvv', '#cvc', '#securityCode', '#securitycode', '#cardCvv'
-    ], ['cvv', 'cvc', 'security code', 'cvv2'])
-  };
-}
-
-// ═════════════════════════════════════════════════════════════
-// FIELD SEARCH — each frame searches ONLY its own document
-// ═════════════════════════════════════════════════════════════
-
-/**
- * Like findField() but retries up to ~3 seconds for lazily-rendered fields.
- * Useful for billing address fields that appear after card iframe loads.
- */
-async function waitForField(selectors, labels = [], baseDelay = 220) {
-  const maxWait = 3000;
-  const interval = Math.max(200, Math.min(400, baseDelay));
-  const tries = Math.ceil(maxWait / interval);
-
-  for (let i = 0; i < tries; i++) {
-    const found = findField(selectors, labels);
-    if (found) return found;
-    if (i < tries - 1) await sleep(interval);
-  }
-  return null;
-}
-
-function findField(selectors, labels = []) {
-  const doc = document;
-
-  const selectorMatch = findFieldBySelectors(doc, selectors);
-  if (selectorMatch) return selectorMatch;
-
-  if (!labels.length) return null;
-
-  const labelMatch = findFieldByLabels(doc, labels);
-  return labelMatch || null;
-}
-
-function findFieldBySelectors(doc, selectors) {
-  for (const sel of selectors) {
-    try {
-      const matches = Array.from(doc.querySelectorAll(sel));
-      const candidate = matches.find(isVisible) || matches.find(isUsableField);
-      if (candidate) return candidate;
-    } catch (_) { }
-  }
-  return null;
-}
-
-function findFieldByLabels(doc, labels) {
-  const allInputs = Array.from(doc.querySelectorAll('input, select, textarea'));
-  const allLabels = Array.from(doc.querySelectorAll('label'));
-
-  for (const labelText of labels) {
-    const regex = new RegExp(escapeRegex(labelText), 'i');
-
-    for (const lbl of allLabels) {
-      if (!regex.test(lbl.textContent || '')) continue;
-      const forId = lbl.getAttribute('for');
-      const candidate = (forId && doc.getElementById(forId)) || lbl.querySelector('input, select, textarea');
-      if (candidate && (isVisible(candidate) || isUsableField(candidate))) return candidate;
+    /**
+     * Cross-frame coordination helper
+     */
+    async function notifyFillStatus(status) {
+      if (chrome.runtime?.id) {
+        try {
+          return new Promise(resolve => {
+            chrome.runtime.sendMessage({ action: 'fill_status', status }, resolve);
+          });
+        } catch (e) { }
+      }
     }
 
-    for (const input of allInputs) {
-      const haystack = [
-        input.getAttribute('placeholder') || '',
-        input.getAttribute('aria-label') || '',
-        input.getAttribute('autocomplete') || '',
-        input.name || '', input.id || ''
-      ].join(' ');
-      if (regex.test(haystack) && (isVisible(input) || isUsableField(input))) return input;
+    // ═════════════════════════════════════════════════════════════
+    // TOP FRAME: fills billing address fields in its own document
+    // ═════════════════════════════════════════════════════════════
+    async function fillTopFrame(cardData, delay, address) {
+      const stepDelay = Math.max(delay, 80);
+
+      // Report start if we are filling address or card fields
+      const addrValues = Object.entries(address || {}).filter(([k]) => !k.startsWith('_')).map(([, v]) => v);
+      const hasAddress = addrValues.some(v => v && v !== false);
+      const fields = scanPaymentFields();
+      const hasCard = anyPaymentFieldPresent(fields);
+
+      if (hasAddress || hasCard) await notifyFillStatus('started');
+
+      try {
+        await uncheckAnnoyingBoxes(stepDelay);
+        if (hasCard) await fillCardFields(cardData, fields, stepDelay);
+        if (hasAddress) await fillBillingAddress(address, stepDelay);
+      } finally {
+        if (hasAddress || hasCard) await notifyFillStatus('finished');
+      }
     }
-  }
-  return null;
-}
 
-// ═════════════════════════════════════════════════════════════
-// UTILITIES
-// ═════════════════════════════════════════════════════════════
-function fieldDesc(el) {
-  if (el.id) return `#${el.id}`;
-  if (el.name) return `[name="${el.name}"]`;
-  if (el.getAttribute('placeholder')) return `[placeholder="${el.getAttribute('placeholder').slice(0, 20)}"]`;
-  return el.tagName.toLowerCase();
-}
+    // ═════════════════════════════════════════════════════════════
+    // SUB-FRAME: fills card + billing address in its own document
+    // ═════════════════════════════════════════════════════════════
+    async function fillCardFieldsInFrame(cardData, address, delay) {
+      const stepDelay = Math.max(delay, 80);
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+      const addrValues = Object.entries(address || {}).filter(([k]) => !k.startsWith('_')).map(([, v]) => v);
+      const hasAddress = addrValues.some(v => v && v !== false);
 
-function getAssociatedLabelText(field) {
-  if (!field || !field.ownerDocument) return '';
-  const labels = [];
-  const fieldId = field.id;
-  if (fieldId) {
-    for (const label of field.ownerDocument.querySelectorAll(`label[for="${cssEscape(fieldId)}"]`)) {
-      labels.push(label.textContent || '');
+      let fields = scanPaymentFields();
+      let hasCard = anyPaymentFieldPresent(fields);
+
+      if (!hasCard && hasAddress) {
+         // Check once more in subframe addressing
+         const nameField = await waitForField(['#billingAddress-nameInput', '[name="name"]'], null, 100);
+         if (nameField) hasCard = false; // Just to proceed with address
+      } else if (!hasCard) {
+         // Scan once more with slight delay to catch Stripe's delayed iframe loading
+         await sleep(stepDelay);
+         fields = scanPaymentFields();
+         hasCard = anyPaymentFieldPresent(fields);
+         if (!hasCard && !hasAddress) return; 
+      }
+
+      await notifyFillStatus('started');
+
+      try {
+        await uncheckAnnoyingBoxes(stepDelay);
+        if (anyPaymentFieldPresent(fields)) {
+          await fillCardFields(cardData, fields, stepDelay);
+          if (hasAddress) await fillBillingAddress(address, stepDelay);
+          logStep('info', '✅', `Card frame filled — ${window.location.origin}`);
+        } else if (hasAddress) {
+          await fillBillingAddress(address, stepDelay);
+          logStep('info', '✅', `Address frame filled — ${window.location.origin}`);
+        }
+      } finally {
+        await notifyFillStatus('finished');
+      }
     }
-  }
-  let parent = field.parentElement;
-  while (parent) {
-    if (parent.tagName === 'LABEL') { labels.push(parent.textContent || ''); break; }
-    parent = parent.parentElement;
-  }
-  return labels.join(' ');
-}
 
-function cssEscape(value) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value);
-  return String(value).replace(/["\\]/g, '\\$&');
-}
+    function anyPaymentFieldPresent(f) {
+      return !!(f.cardNumberField || f.combinedExpiryField || f.expiryMonthField || f.expiryYearField || f.cvvField);
+    }
 
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+    // ═════════════════════════════════════════════════════════════
+    // SHARED: fill card fields from a scan result
+    // ═════════════════════════════════════════════════════════════
+    async function fillCardFields(cardData, fields, stepDelay) {
+      const { cardNumberField, combinedExpiryField, expiryMonthField, expiryYearField, cvvField } = fields;
 
-function isUsableField(el) {
-  return Boolean(el) && !el.disabled && !el.readOnly;
-}
+      const month = cardData.expiry?.month || cardData.month;
+      const year = cardData.expiry?.year || cardData.year;
+      const yearShort = cardData.expiry?.yearShort || String(year).slice(-2);
 
-function isVisible(el) {
-  if (!el) return false;
-  const view = el.ownerDocument?.defaultView || window;
-  const style = view.getComputedStyle(el);
-  const rect = el.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 &&
-    !el.disabled && style.visibility !== 'hidden' &&
-    style.display !== 'none' && style.opacity !== '0';
-}
+      if (cardNumberField) {
+        await fillField(cardNumberField, cardData.number || '', stepDelay);
+        logStep('success', '💳', `PAN: ${cardData.number?.replace(/\s/g, '').replace(/(\d{4})/g, '$1 ').trim().replace(/\d{4} \d{4} \d{4} (\d{4})/, '•••• •••• •••• $1')}`);
+      }
 
-async function fillField(field, value, delay = 220) {
-  field.focus();
-  const view = field.ownerDocument?.defaultView || window;
-  let nativeSetter = null;
+      if (combinedExpiryField) {
+        const expiryValue = formatExpiryForField(combinedExpiryField, month, year, yearShort);
+        await fillField(combinedExpiryField, expiryValue, stepDelay);
+        logStep('success', '📅', `Expiry: ${expiryValue}`);
+      } else {
+        if (expiryMonthField) {
+          await fillField(expiryMonthField, month, stepDelay);
+        }
+        if (expiryYearField) {
+          await fillField(expiryYearField, year, yearShort, stepDelay);
+        }
+        if (expiryMonthField || expiryYearField) {
+          logStep('success', '📅', `Expiry: ${month}/${yearShort}`);
+        }
+      }
 
-  if (field.tagName === 'INPUT') {
-    nativeSetter = Object.getOwnPropertyDescriptor(view.HTMLInputElement.prototype, 'value');
-  } else if (field.tagName === 'TEXTAREA') {
-    nativeSetter = Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype, 'value');
-  } else if (field.tagName === 'SELECT') {
-    nativeSetter = Object.getOwnPropertyDescriptor(view.HTMLSelectElement.prototype, 'value');
-  }
+      if (cvvField) {
+        await fillField(cvvField, cardData.cvv || '', stepDelay);
+        logStep('success', '🔒', `CVV: ${cardData.cvv || ''}`);
+      }
+    }
 
-  if (field.tagName === 'SELECT') {
-    if (nativeSetter?.set) nativeSetter.set.call(field, value);
-    else field.value = value;
-    ['input', 'change', 'blur'].forEach((e) => field.dispatchEvent(new Event(e, { bubbles: true })));
-    field.blur();
-    return;
-  }
+    // ═════════════════════════════════════════════════════════════
+    // BILLING ADDRESS
+    // ═════════════════════════════════════════════════════════════
+    async function fillBillingAddress(address, delay) {
+      const fields = [
+        { key: 'name', selectors: ['#billingAddress-nameInput', '[name="name"]', '[autocomplete="billing name"]'], labels: ['full name', 'name'] },
+        { key: 'state', selectors: ['#billingAddress-stateInput', '[name="state"]', 'select[name="state"]', '[autocomplete="billing address-level1"]'], labels: ['state', 'province', 'region'] },
+        { key: 'city', selectors: ['#billingAddress-cityInput', '[name="city"]', '[autocomplete="billing address-level2"]'], labels: ['city', 'town'] },
+        { key: 'line1', selectors: ['#billingAddress-line1Input', '[name="address1"]', '[name="line1"]', '[autocomplete="billing address-line1"]'], labels: ['address line 1', 'street address'] },
+        { key: 'line2', selectors: ['#billingAddress-line2Input', '[name="address2"]', '[name="line2"]', '[autocomplete="billing address-line2"]'], labels: ['address line 2', 'apartment', 'suite'] },
+        { key: 'postal', selectors: ['#billingAddress-postalCodeInput', '[name="postalCode"]', '[autocomplete="billing postal-code"]', '#postal', '#zip'], labels: ['postal code', 'zip code', 'zip', 'postal'] }
+      ];
 
-  await clearTextField(field, nativeSetter);
-  await typeTextLikeHuman(field, String(value ?? ''), nativeSetter, delay);
-  field.dispatchEvent(new Event('change', { bubbles: true }));
-  field.blur();
-}
+      for (const f of fields) {
+        if (!address[f.key]) continue;
+        const el = await waitForField(f.selectors, f.labels, 50);
+        if (el) {
+          await fillField(el, address[f.key], delay);
+          const icon = f.key === 'name' ? '👤' : (f.key === 'postal' ? '📮' : '🗺');
+          logStep('success', icon, `${f.key.charAt(0).toUpperCase() + f.key.slice(1)}: ${address[f.key]}`);
+        }
+      }
+    }
 
-async function fillMonthField(field, month, delay = 220) {
-  if (!month) return;
-  const padded = String(month).padStart(2, '0');
-  const numeric = String(parseInt(padded, 10));
-  if (field.tagName === 'SELECT') {
-    const candidates = [padded, numeric, monthName(padded), monthName(padded).slice(0, 3)];
-    const opt = findMatchingOption(field, candidates);
-    if (opt) { await fillField(field, opt.value, delay); return; }
-  }
-  await fillField(field, padded, delay);
-}
+    async function uncheckAnnoyingBoxes(delay) {
+      const selectors = [
+        '#payment-linkOptInInput', 'input[name="linkOptIn"]',
+        '#business', 'input[name="business"]', 'input[name="isBusiness"]', 'input[name*="business" i]'
+      ];
+      for (const selector of selectors) {
+        const els = document.querySelectorAll(selector);
+        for (const el of els) {
+          if (el.checked || el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-testing-state-value') === 'true') {
+            try { el.click(); } catch(e){}
+            await sleep(50);
+          }
+        }
+      }
+      const labels = Array.from(document.querySelectorAll('label'));
+      for (const lbl of labels) {
+        const text = (lbl.textContent || '').toLowerCase();
+        if (text.includes('faster checkout') || text.includes('purchasing as a business')) {
+          const inputId = lbl.getAttribute('for');
+          let input = document.getElementById(inputId);
+          if (!input) input = lbl.querySelector('input[type="checkbox"]');
+          if (input && (input.checked || input.getAttribute('aria-checked') === 'true')) {
+            try { input.click(); } catch(e){}
+          }
+        }
+      }
+    }
 
-async function fillYearField(field, fullYear, shortYear, delay = 220) {
-  if (!fullYear && !shortYear) return;
-  const fy = String(fullYear || '');
-  const sy = String(shortYear || fy.slice(-2));
-  if (field.tagName === 'SELECT') {
-    const opt = findMatchingOption(field, [fy, sy, fy.slice(-2)]);
-    if (opt) { await fillField(field, opt.value, delay); return; }
-  }
-  await fillField(field, fy || sy, delay);
-}
+    // ═════════════════════════════════════════════════════════════
+    // FIELD SCANNING
+    // ═════════════════════════════════════════════════════════════
+    function scanPaymentFields() {
+      const findField = (selectors, labels) => {
+        for (const s of selectors) {
+          const el = document.querySelector(s);
+          if (el && isVisible(el)) return el;
+        }
+        const inputs = document.querySelectorAll('input, select');
+        for (const input of inputs) {
+          if (!isVisible(input)) continue;
+          const labelText = getLabelText(input).toLowerCase();
+          if (labels.some(l => labelText.includes(l))) return input;
+          const ph = (input.placeholder || '').toLowerCase();
+          if (labels.some(l => ph.includes(l))) return input;
+        }
+        return null;
+      };
 
-async function clearTextField(field, nativeSetter) {
-  setFieldValue(field, '', nativeSetter);
-  field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
-  await sleep(40);
-}
+      return {
+        cardNumberField: findField([
+          'input[data-elements-stable-field-name="cardNumber"]',
+          '#payment-cardNumberInput',
+          'input[id*="cardNumberInput" i]',
+          'input[class*="CardNumberInput" i]',
+          'input[autocomplete="cc-number"]',
+          'input[name*="cardnumber" i]', 'input[name*="number" i]'
+        ], ['card number', 'pan', 'số thẻ']),
 
-async function typeTextLikeHuman(field, value, nativeSetter, delay) {
-  const perCharDelay = Math.max(35, Math.min(120, Math.round(delay / 4)));
-  for (const char of value) {
-    dispatchKeyboardEvent(field, 'keydown', char);
-    dispatchKeyboardEvent(field, 'keypress', char);
-    setFieldValue(field, `${field.value}${char}`, nativeSetter);
-    field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char }));
-    dispatchKeyboardEvent(field, 'keyup', char);
-    await sleep(perCharDelay);
-  }
-}
+        combinedExpiryField: findField([
+          'input[data-elements-stable-field-name="cardExpiry"]',
+          '#payment-expiryInput',
+          'input[id*="expiryInput" i]',
+          'input[class*="CardExpiryInput" i]',
+          'input[autocomplete="cc-exp"]'
+        ], ['exp', 'expiry', 'valid thru', 'thời hạn']),
 
-function setFieldValue(field, value, nativeSetter) {
-  if (nativeSetter?.set) nativeSetter.set.call(field, value);
-  else field.value = value;
-}
+        expiryMonthField: findField([
+          'input[name*="exp-month" i]', 'select[name*="exp-month" i]',
+          'input[autocomplete="cc-exp-month"]'
+        ], ['month', 'tháng']),
 
-function dispatchKeyboardEvent(field, type, key) {
-  let code = 'Unidentified';
-  if (/^\d$/.test(key)) code = `Digit${key}`;
-  else if (/^[a-z]$/i.test(key)) code = `Key${key.toUpperCase()}`;
-  else if (key === '/') code = 'Slash';
-  else if (key === ' ') code = 'Space';
+        expiryYearField: findField([
+          'input[name*="exp-year" i]', 'select[name*="exp-year" i]',
+          'input[autocomplete="cc-exp-year"]'
+        ], ['year', 'năm']),
 
-  field.dispatchEvent(new KeyboardEvent(type, {
-    key, code, keyCode: key.charCodeAt(0), which: key.charCodeAt(0), bubbles: true
-  }));
-}
+        cvvField: findField([
+          'input[data-elements-stable-field-name="cardCvc"]',
+          '#payment-cvcInput',
+          'input[id*="cvcInput" i]',
+          'input[class*="CardCvcInput" i]',
+          'input[autocomplete="cc-csc"]',
+          'input[name*="cvv" i]', 'input[name*="cvc" i]'
+        ], ['cvv', 'cvc', 'security code', 'mã bảo mật'])
+      };
+    }
 
-function findMatchingOption(select, candidates) {
-  const normalized = candidates.filter(Boolean).map(c => c.toString().trim().toLowerCase());
-  return Array.from(select.options).find((opt) => {
-    const value = opt.value.toString().trim().toLowerCase();
-    const label = opt.textContent.toString().trim().toLowerCase();
-    return normalized.some(c =>
-      value === c || label === c ||
-      value.replace(/^0/, '') === c.replace(/^0/, '') ||
-      label.replace(/^0/, '') === c.replace(/^0/, '')
-    );
-  }) || null;
-}
+    function hasAnyPaymentField(f) {
+      return !!(f.cardNumberField || f.combinedExpiryField || f.expiryMonthField || f.expiryYearField || f.cvvField);
+    }
 
-function monthName(month) {
-  const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  return names[parseInt(month, 10) - 1] || month;
-}
+    // ── Helpers ──
+    async function fillField(el, value, delay) {
+      if (!el || !value) return;
+      
+      // 1. Mô phỏng di chuột và Focus như người thật
+      const rect = el.getBoundingClientRect();
+      const mouseData = { bubbles: true, cancelable: true, view: window, clientX: rect.left + 5, clientY: rect.top + 5 };
+      el.dispatchEvent(new MouseEvent('mousedown', mouseData));
+      el.focus();
+      el.dispatchEvent(new MouseEvent('mouseup', mouseData));
+      el.dispatchEvent(new MouseEvent('click', mouseData));
 
-function formatCardDisplay(number) {
-  const clean = String(number).replace(/\D/g, '');
-  return `•••• •••• •••• ${clean.slice(-4)}`;
-}
+      // Nghỉ một chút trước khi gõ (như đang chuẩn bị tay)
+      await sleep(Math.floor(Math.random() * 80) + 100);
 
-function formatExpiryForField(field, month, year, yearShort) {
-  const fullYear = String(year || '');
-  const short = String(yearShort || fullYear.slice(-2));
-  const text = [
-    field?.getAttribute('placeholder') || '', field?.getAttribute('aria-label') || '',
-    field?.name || '', field?.id || '', getAssociatedLabelText(field)
-  ].join(' ').toLowerCase();
-  if (/yyyy/.test(text)) return `${month}/${fullYear}`;
-  return `${month}/${short}`;
+      if (el.tagName === 'SELECT') {
+        el.value = value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        // Xóa trắng ô input trước khi gõ
+        el.value = '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const strValue = String(value);
+        for (let i = 0; i < strValue.length; i++) {
+          const char = strValue[i];
+          const keyCode = char.charCodeAt(0);
+          
+          // Gửi KeyDown và KeyPress (rất quan trọng cho Stripe/ChatGPT)
+          el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: char, keyCode }));
+          el.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, key: char, keyCode }));
+          
+          // Sử dụng execCommand để "nhét" chữ vào buffer (đây là cách chân thực nhất)
+          let success = false;
+          try {
+            success = document.execCommand('insertText', false, char);
+          } catch (e) { success = false; }
+
+          if (!success) {
+            // Fallback nếu trình duyệt chặn execCommand
+            el.value += char;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: char }));
+          }
+          
+          // Gửi KeyUp
+          el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: char, keyCode }));
+
+          // ── TỐC ĐỘ GÕ "TẦM TRUNG - NHANH" (40-75ms mỗi phím) ──
+          let charDelay = Math.floor(Math.random() * 35) + 40; 
+          
+          // Thỉnh thoảng khựng lại một chút (như người thật đang đổi ngón tay)
+          if (Math.random() > 0.92) charDelay += 120;
+          if (char === ' ') charDelay += 50; // Phím cách thường gõ chậm hơn xíu
+
+          await sleep(charDelay);
+        }
+      }
+      
+      // Hoàn tất: trigger change và thoát focus
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(Math.floor(Math.random() * 100) + 50);
+      el.blur();
+      await sleep(delay);
+    }
+
+    function formatExpiryForField(el, month, year, yearShort) {
+      const ph = (el.placeholder || '').toLowerCase();
+      if (ph.includes('yy') && !ph.includes('yyyy')) return `${month}${yearShort}`;
+      if (ph.includes('/') || ph.includes(' / ')) return `${month} / ${yearShort}`;
+      return `${month}${yearShort}`;
+    }
+
+    async function waitForField(selectors, labels, timeout = 1000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        for (const s of selectors) {
+          const el = document.querySelector(s);
+          if (el && isVisible(el)) return el;
+        }
+        const inputs = document.querySelectorAll('input, select');
+        for (const input of inputs) {
+          if (!isVisible(input)) continue;
+          const labelText = getLabelText(input).toLowerCase();
+          if (labels.some(l => labelText.includes(l))) return input;
+        }
+        await sleep(100);
+      }
+      return null;
+    }
+
+    function isVisible(el) {
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && el.offsetParent !== null;
+    }
+
+    function getLabelText(input) {
+      const id = input.id;
+      if (id) {
+        const label = document.querySelector(`label[for="${id}"]`);
+        if (label) return label.textContent;
+      }
+      let parent = input.parentElement;
+      while (parent) {
+        if (parent.tagName === 'LABEL') return parent.textContent;
+        parent = parent.parentElement;
+      }
+      return '';
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  })();
 }

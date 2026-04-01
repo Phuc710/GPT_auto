@@ -327,7 +327,7 @@ class RegistrationService:
             self._cleanup_browser()
 
     def _finish(self, tracker: StepTracker, account_data: Optional[Dict], email: Optional[str] = None) -> Optional[Dict]:
-        """Hiển thị summary và trả về kết quả. Xóa email nếu thất bại."""
+        """Hiển thị summary và trả về kết quả. Thực hiện dọn dẹp email tạm thời."""
         success = False
         if account_data and account_data.get("status") == "success":
             success = True
@@ -336,23 +336,23 @@ class RegistrationService:
                 f"     Mật khẩu: {account_data.get('password')}"
             )
             tracker.summary(success=True, detail=detail)
-            return account_data
+        else:
+            tracker.summary(success=False, detail="Đăng ký thất bại")
         
-        # THẤT BẠI: Xóa email và dọn dẹp
-        tracker.summary(success=False, detail="Đăng ký thất bại")
-        
-        # Ưu tiên lấy email từ account_data, nếu không có thì dùng tham số email
         target_email = (account_data.get("email") if account_data else None) or email
         
         if target_email and self.email_api:
-            Logger.warning(f"Đang xóa email lỗi: {target_email}...")
-            try:
-                self.email_api.delete_email(target_email)
-                AccountStorage.delete_local_infoacc(target_email)
-            except Exception as e:
-                Logger.debug(f"Không thể xóa email: {e}")
+            if not success:
+                Logger.info(f"Đang dọn dẹp email tạm do lỗi: {target_email}...")
+                try:
+                    self.email_api.delete_email(target_email)
+                    AccountStorage.delete_local_infoacc(target_email)
+                except Exception as e:
+                    Logger.debug(f"Không thể xóa email: {e}")
+            else:
+                Logger.info(f"Done Mail: {target_email}")
                 
-        return None
+        return account_data if success else None
 
 
 # ============ MENU HANDLERS ============
@@ -379,7 +379,7 @@ def handle_parallel_registration():
         Logger.warning("Vui lòng nhập số nguyên!")
         return
 
-    parallel_reg = ParallelRegistration(num, 1920, 1080)
+    parallel_reg = ParallelRegistration(num)
     results = parallel_reg.register_parallel(AccountStorage, Logger)
     Logger.success(f"Đã lưu {len(results)} tài khoản vào {INFOACC_DIR}/")
 
@@ -397,6 +397,14 @@ def view_csv_accounts():
         password  = acc.get("password", "N/A")
         plan      = acc.get("plan_type", "?") or "?"
         created   = acc.get("created_at", "N/A")
+        has_tok   = "KEY" if acc.get("access_token") else "---"
+        plan_key  = plan.lower()
+        if plan_key == "plus":
+            plan_color = Color.CYAN
+        elif plan_key == "pro":
+            plan_color = Color.GREEN
+        else:
+            plan_color = Color.GRAY
         print(f"  {Color.GREEN}[✓]{Color.RESET} {email:<40} {plan_color}{plan.upper():<5}{Color.RESET}  {Color.GRAY}{created}{Color.RESET}")
         print(f"       {Color.DIM}Mật: {password}  |  Token: {has_tok}{Color.RESET}")
 
@@ -429,7 +437,7 @@ def view_infoacc_accounts():
 def display_menu():
     W = 62
     print(f"\n{Color.BOLD}{Color.CYAN}{'═' * W}{Color.RESET}")
-    print(f"  GPT AUTO REGISTRATION  |  v2.0")
+    print(f"  GPT AUTO REGISTRATION  |  v1.0")
     print(f"{Color.GRAY}{'─' * W}{Color.RESET}")
     print(f"  {Color.WHITE}1.{Color.RESET}  Đăng ký {Color.GREEN}1{Color.RESET} tài khoản")
     print(f"  {Color.WHITE}2.{Color.RESET}  Đăng ký {Color.GREEN}Parallel{Color.RESET}")

@@ -87,10 +87,44 @@ async function handleGenerateCard(request) {
   return { success: true, card };
 }
 
+// ─── Fill Coordinator (Cross-frame sync) ──────────────────────
+let activeFillCounts = {}; // tabId -> count
+
+function handleFillStatus(request, sender) {
+  const tabId = sender.tab?.id;
+  if (!tabId) return;
+
+  if (request.status === 'reset') {
+    activeFillCounts[tabId] = 0;
+    return;
+  }
+
+  if (!activeFillCounts[tabId]) activeFillCounts[tabId] = 0;
+
+  if (request.status === 'started') {
+    activeFillCounts[tabId]++;
+    console.log(`[Coordinator] Tab ${tabId}: Frame started filling. Total active: ${activeFillCounts[tabId]}`);
+  } else if (request.status === 'finished') {
+    activeFillCounts[tabId] = Math.max(0, activeFillCounts[tabId] - 1);
+    console.log(`[Coordinator] Tab ${tabId}: Frame finished. Remaining: ${activeFillCounts[tabId]}`);
+
+    if (activeFillCounts[tabId] === 0) {
+      // Small debounce to ensure no other frames are mid-start
+      setTimeout(() => {
+        if (activeFillCounts[tabId] === 0) {
+          console.log(`[Coordinator] Tab ${tabId}: All frames finished! Triggering subscribe...`);
+          chrome.tabs.sendMessage(tabId, { action: 'all_fills_complete' }).catch(() => {});
+        }
+      }, 150);
+    }
+  }
+}
+
 const MESSAGE_HANDLERS = {
   getSettings: handleGetSettings,
   saveSettings: handleSaveSettings,
-  generateCard: handleGenerateCard
+  generateCard: handleGenerateCard,
+  fill_status: (req, sender) => { handleFillStatus(req, sender); return { success: true }; }
 };
 
 chrome.runtime.onInstalled.addListener(async (details) => {
