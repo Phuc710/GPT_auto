@@ -1,51 +1,48 @@
-// Auto Fill GPT - Popup Script (v4 — dual button)
+// Auto Fill GPT - Popup Script (v5 Refactor)
+'use strict';
+
 document.addEventListener('DOMContentLoaded', () => {
+  // --- Elements ---
+  const el = {
+    binInput: document.getElementById('binInput'),
+    monthInput: document.getElementById('monthInput'),
+    yearInput: document.getElementById('yearInput'),
+    cvvInput: document.getElementById('cvvInput'),
+    binTypeBadge: document.getElementById('binTypeBadge'),
+    typeBtns: document.querySelectorAll('.type-btn'),
+    fillFullBtn: document.getElementById('fillFullBtn'),
+    fillCardBtn: document.getElementById('fillCardBtn'),
+    clearLogBtn: document.getElementById('clearLogBtn'),
+    logContainer: document.getElementById('logContainer'),
+    pageStatus: document.getElementById('pageStatus'),
+    pageUrl: document.getElementById('pageUrl'),
+    reloadTabBtn: document.getElementById('reloadTabBtn'),
+    autoCaptchaToggle: document.getElementById('autoCaptchaToggle'),
+    settingsBtn: document.getElementById('settingsBtn'),
+    backBtn: document.getElementById('backBtn'),
+    mainScreen: document.getElementById('mainScreen'),
+    settingsScreen: document.getElementById('settingsScreen'),
+    saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+    settings: {
+      bin: document.getElementById('defaultBin'),
+      type: document.getElementById('defaultCardType'),
+      month: document.getElementById('defaultMonth'),
+      year: document.getElementById('defaultYear'),
+      cvv: document.getElementById('defaultCvv'),
+      country: document.getElementById('defaultCountry'),
+      name: document.getElementById('defaultName'),
+      state: document.getElementById('defaultState'),
+      city: document.getElementById('defaultCity'),
+      addr1: document.getElementById('defaultAddress1'),
+      addr2: document.getElementById('defaultAddress2'),
+      postal: document.getElementById('defaultPostal'),
+      delay: document.getElementById('fillDelay')
+    }
+  };
 
-  // ─── Elements ─────────────────────────────────────────────
-  const binInput = document.getElementById('binInput');
-  const monthInput = document.getElementById('monthInput');
-  const yearInput = document.getElementById('yearInput');
-  const cvvInput = document.getElementById('cvvInput');
-
-  const binTypeBadge = document.getElementById('binTypeBadge');
-  const typeBtns = document.querySelectorAll('.type-btn');
-  const fillFullBtn = document.getElementById('fillFullBtn');
-  const fillCardBtn = document.getElementById('fillCardBtn');
-  const clearLogBtn = document.getElementById('clearLogBtn');
-  const logContainer = document.getElementById('logContainer');
-  const pageStatus = document.getElementById('pageStatus');
-  const pageUrl = document.getElementById('pageUrl');
-  const reloadTabBtn = document.getElementById('reloadTabBtn');
-  const countryBtns = document.querySelectorAll('.country-btn');
-  const autoCaptchaToggle = document.getElementById('autoCaptchaToggle');
-
-  // Settings screen
-  const settingsBtn = document.getElementById('settingsBtn');
-  const backBtn = document.getElementById('backBtn');
-  const mainScreen = document.getElementById('mainScreen');
-  const settingsScreen = document.getElementById('settingsScreen');
-  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-
-  // Settings fields — card
-  const s_bin = document.getElementById('defaultBin');
-  const s_cardType = document.getElementById('defaultCardType');
-  const s_month = document.getElementById('defaultMonth');
-  const s_year = document.getElementById('defaultYear');
-  const s_cvv = document.getElementById('defaultCvv');
-  // Settings fields — billing address
-  const s_country = document.getElementById('defaultCountry');
-  const s_name = document.getElementById('defaultName');
-  const s_state = document.getElementById('defaultState');
-  const s_addr1 = document.getElementById('defaultAddress1');
-  const s_addr2 = document.getElementById('defaultAddress2');
-  const s_city = document.getElementById('defaultCity');
-  const s_postal = document.getElementById('defaultPostal');
-  // Settings fields — behavior
-  const s_delay = document.getElementById('fillDelay');
-
-  // ─── State ────────────────────────────────────────────────
+  // --- State ---
   let selectedType = '';
-  let settings = {
+  let appSettings = {
     fillDelay: 100,
     defaultBin: '', defaultCardType: '',
     defaultMonth: '', defaultYear: '', defaultCvv: '',
@@ -55,197 +52,185 @@ document.addEventListener('DOMContentLoaded', () => {
     defaultCity: '', defaultPostal: ''
   };
 
-  // Dedicated config for the global scripts
-  let globalSettings = {
-    standaloneCaptcha: false
-  };
+  // --- Initialization ---
+  init();
 
-  // ─── Init ─────────────────────────────────────────────────
-  loadSettings();
-  detectCurrentTab();
-
-  // ─── Navigation ───────────────────────────────────────────
-  settingsBtn.addEventListener('click', () => {
-    populateSettingsUI();
-    mainScreen.style.display = 'none';
-    settingsScreen.style.display = 'flex';
-  });
-  backBtn.addEventListener('click', () => {
-    settingsScreen.style.display = 'none';
-    mainScreen.style.display = 'flex';
-  });
-
-  saveSettingsBtn.addEventListener('click', () => {
-    settings.defaultBin = (s_bin.value || '').replace(/\D/g, '');
-    settings.defaultCardType = s_cardType.value;
-    settings.defaultMonth = (s_month.value || '').replace(/\D/g, '');
-    settings.defaultYear = (s_year.value || '').replace(/\D/g, '');
-    settings.defaultCvv = (s_cvv.value || '').replace(/\D/g, '');
-    settings.defaultCountry = s_country.value;
-    settings.defaultName = s_name.value.trim();
-    settings.defaultState = s_state.value.trim();
-    settings.defaultAddress1 = s_addr1.value.trim();
-    settings.defaultAddress2 = s_addr2.value.trim();
-    settings.defaultCity = s_city.value.trim();
-    settings.defaultPostal = s_postal.value.trim();
-    settings.fillDelay = parseInt(s_delay.value) || 100;
-
-    chrome.storage.local.set({ afSettings: settings }, () => {
-      applySettingsToMainForm();
-      saveSettingsBtn.textContent = '✓ Saved!';
-      setTimeout(() => { saveSettingsBtn.textContent = '💾 Save Settings'; }, 1500);
-    });
-  });
-
-  // ─── Network Type Buttons ─────────────────────────────────
-  typeBtns.forEach(btn => btn.addEventListener('click', () => {
-    const t = btn.dataset.type;
-    if (selectedType === t) {
-      selectedType = '';
-      typeBtns.forEach(b => b.classList.remove('active'));
-      const detected = CardGenerator.detectCardType(binInput.value);
-      applyNetworkUI(detected ? detected.type : null);
-    } else {
-      selectedType = t;
-      typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === t));
-      applyNetworkUI(t);
-      if (!binInput.value) {
-        binInput.value = CardGenerator.generateRandomBIN(t);
-        binInput.dispatchEvent(new Event('input'));
-        return;
-      }
-    }
-  }));
-
-  // ─── Country Quick Select ────────────────────────────────
-  countryBtns.forEach(btn => btn.addEventListener('click', () => {
-    const c = btn.dataset.country;
-    settings.defaultCountry = c;
-    updateCountryUI(c);
-    // Update settings in storage too
-    chrome.storage.local.set({ afSettings: settings });
-    addLog('info', '🌍', `Country switched to: ${btn.title}`);
-  }));
-
-  function updateCountryUI(countryCode) {
-    countryBtns.forEach(b => b.classList.toggle('active', b.dataset.country === countryCode));
-    if (s_country) s_country.value = countryCode;
+  function init() {
+    loadSettings();
+    updateTabInfo();
+    setupEventListeners();
   }
 
-  // ─── BIN Input → live auto-detect & smart parse ───────────
-  binInput.addEventListener('input', () => {
-    let val = binInput.value.trim();
+  function setupEventListeners() {
+    // Navigation
+    el.settingsBtn.addEventListener('click', () => toggleScreen('settings'));
+    el.backBtn.addEventListener('click', () => toggleScreen('main'));
+
+    // Form inputs
+    el.binInput.addEventListener('input', handleBinInput);
+    [el.monthInput, el.yearInput, el.cvvInput].forEach(input => {
+      input.addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, ''); });
+    });
+
+    // Action buttons
+    el.fillFullBtn.addEventListener('click', () => startFill(true));
+    el.fillCardBtn.addEventListener('click', () => startFill(false));
+    el.clearLogBtn.addEventListener('click', clearLogs);
+    el.reloadTabBtn.addEventListener('click', reloadTab);
+    el.saveSettingsBtn.addEventListener('click', saveSettings);
+
+    // Feature toggles
+    el.autoCaptchaToggle.addEventListener('change', toggleAutoCaptcha);
     
-    // Smart Parse: If user pastes "number|mm|yy|cvv"
+    // Quick selectors (card type only — country moved to Settings)
+    el.typeBtns.forEach(btn => btn.addEventListener('click', () => selectCardType(btn.dataset.type)));
+
+    // Global listeners
+    chrome.runtime.onMessage.addListener(msg => {
+      if (msg.action === 'log_step') addLog(msg.type, msg.icon, msg.msg);
+    });
+  }
+
+  // --- Core Handlers ---
+
+  function handleBinInput() {
+    let val = el.binInput.value.trim();
+    
+    // Smart Pipe Parse (number|mm|yy|cvv)
     if (val.includes('|')) {
       const parts = val.split('|').map(p => p.trim());
       if (parts.length >= 3) {
-        const cardNumber = parts[0].replace(/\D/g, '');
-        const month = parts[1].replace(/\D/g, '');
-        const year = parts[2].replace(/\D/g, '');
-        const cvv = parts[3] ? parts[3].replace(/\D/g, '') : '';
+        el.binInput.value = parts[0].replace(/\D/g, '');
+        el.monthInput.value = parts[1].replace(/\D/g, '');
+        el.yearInput.value = parts[2].replace(/\D/g, '');
+        if (parts[3]) el.cvvInput.value = parts[3].replace(/\D/g, '');
         
-        binInput.value = cardNumber;
-        if (month) monthInput.value = month;
-        if (year) yearInput.value = year;
-        if (cvv) cvvInput.value = cvv;
-        
-        addLog('success', '🧬', `Smart parsed card: ${cardNumber.slice(0,6)}...|${month}|${year}`);
-        // Re-process simple case
-        val = cardNumber;
+        addLog('success', '🧬', `Smart parsed: ${el.binInput.value.slice(0,6)}...`);
+        val = el.binInput.value;
       }
     }
 
-    binInput.value = binInput.value.replace(/\D/g, '');
-    const detected = CardGenerator.detectCardType(binInput.value);
-    if (detected && !selectedType) {
-      typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === detected.type));
-      applyNetworkUI(detected.type);
-    } else if (!selectedType) {
-      typeBtns.forEach(b => b.classList.remove('active'));
-      applyNetworkUI(null);
-    }
-  });
+    el.binInput.value = val.replace(/\D/g, '');
+    const detected = CardGenerator.detectCardType(el.binInput.value);
+    if (!selectedType) updateNetworkUI(detected ? detected.type : null);
+  }
 
-  // ─── Other inputs ─────────────────────────────────────────
-  [monthInput, yearInput, cvvInput].forEach(el => {
-    el.addEventListener('input', () => { el.value = el.value.replace(/\D/g, ''); });
-  });
-
-  // ─── Clear log ────────────────────────────────────────────
-  clearLogBtn.addEventListener('click', () => {
-    logEntries = [];
-    chrome.storage.local.remove('afLog');
-    logContainer.innerHTML = '<div class="log-empty">Waiting for fill action...</div>';
-  });
-
-  reloadTabBtn.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]) {
-        chrome.tabs.reload(tabs[0].id);
-        addLog('info', '↻', 'Reloading page...');
+  function selectCardType(type) {
+    if (selectedType === type) {
+      selectedType = '';
+      el.typeBtns.forEach(b => b.classList.remove('active'));
+      const detected = CardGenerator.detectCardType(el.binInput.value);
+      updateNetworkUI(detected ? detected.type : null);
+    } else {
+      selectedType = type;
+      el.typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === type));
+      updateNetworkUI(type);
+      if (!el.binInput.value) {
+        el.binInput.value = CardGenerator.generateRandomBIN(type);
+        el.binInput.dispatchEvent(new Event('input'));
       }
-    });
-  });
+    }
+  }
 
-  // ─── Automation Toggles ───────────────────────────────────
+  function selectCountry(code) {
+    appSettings.defaultCountry = code;
+    updateCountryUI(code);
+    chrome.storage.local.set({ afSettings: appSettings });
+    addLog('info', '🌍', `Target country: ${code}`);
+  }
 
-  if (autoCaptchaToggle) {
-    autoCaptchaToggle.addEventListener('change', (e) => {
-      globalSettings.standaloneCaptcha = e.target.checked;
-      chrome.storage.local.set({ standaloneCaptcha: e.target.checked });
-      const status = e.target.checked ? 'enabled' : 'disabled';
-      addLog('info', '🤖', `Auto Captcha ${status}`);
+  // --- Automation Flow ---
+
+  async function startFill(isFull) {
+    const card = buildCardPayload();
+    if (!card) return;
+
+    el.logContainer.innerHTML = '';
+    setLoading(true);
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) { addLog('error', '✗', 'No active tab'); setLoading(false); return; }
+
+    const baseDelay = appSettings.fillDelay || 150;
+
+    // Step 1: Fill Card
+    await fillPhase(tab.id, { action: 'fillCard', cardData: card, fillDelay: baseDelay });
+
+    if (isFull) {
+      // Step 2: Gap between Card and Billing (2x Delay as requested)
+      await sleep(baseDelay * 2);
+      const addr = buildAddressPayload();
+      if (addr._isRandom) addLog('info', '🎲', `Random address: ${addr.name} (${addr.city})`);
+      await fillPhase(tab.id, { action: 'fillBilling', address: addr, fillDelay: baseDelay });
+    }
+
+    // Step 3: Click Subscribe (1x Delay after fill is done)
+    await sleep(baseDelay);
+    chrome.tabs.sendMessage(tab.id, { action: 'trigger_subscribe_now' });
+
+    chrome.storage.local.set({ lastFilledAt: new Date().toISOString() });
+    setLoading(false);
+  }
+
+  function fillPhase(tabId, payload) {
+    return new Promise(resolve => {
+      chrome.runtime.sendMessage({ action: 'fill_status', status: 'reset' });
+
+      const timeout = setTimeout(resolve, 8000); // safety
+      const handler = (msg) => {
+        if (msg.action === 'phase_done') {
+          chrome.runtime.onMessage.removeListener(handler);
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      chrome.runtime.onMessage.addListener(handler);
+
+      sendToTab(tabId, payload, (res, err) => {
+        if (err) {
+          addLog('warn', '⚠', err);
+          // If injection completely fails, resolve after delay
+          setTimeout(() => {
+            chrome.runtime.onMessage.removeListener(handler);
+            clearTimeout(timeout);
+            resolve();
+          }, 2000);
+        }
+      });
     });
   }
 
-  // ─── FILL FULL (Card + Address) ───────────────────────────
-  fillFullBtn.addEventListener('click', () => {
-    const card = buildCard();
-    if (!card) return;
+  function sendToTab(tabId, payload, callback, isRetry = false) {
+    chrome.tabs.sendMessage(tabId, payload, res => {
+      const err = chrome.runtime.lastError;
+      if (!err) return callback(res, null);
 
-    // Reset coordinator
-    chrome.runtime.sendMessage({ action: 'fill_status', status: 'reset' });
+      if (!isRetry && /Receiving end does not exist/i.test(err.message)) {
+        addLog('warn', '↻', 'Injecting engine...');
+        chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          files: ['cardGenerator.js', 'dataGenerator.js', 'subscribeClicker.js', 'captchaSolver.js', 'content.js']
+        }, () => {
+          setTimeout(() => sendToTab(tabId, payload, callback, true), payload.fillDelay || 100);
+        });
+        return;
+      }
+      callback(null, err.message);
+    });
+  }
 
-    // Smart address: use settings if all key fields filled, else random Korean
-    const addr = buildAddress(true);
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    logEntries = [];
-    logContainer.innerHTML = '';
-    if (addr._isRandom) {
-      addLog('info', '🎲', `Random address (${addr.country}): ${addr.name} — ${addr.line1}, ${addr.city}`);
-    }
+  // --- Helpers ---
 
-    setButtonsDisabled(true);
-    triggerFill(card, addr);
-  });
-
-  // ─── FILL CARD ONLY (no address) ──────────────────────────
-  fillCardBtn.addEventListener('click', () => {
-    const card = buildCard();
-    if (!card) return;
-
-    // Reset coordinator
-    chrome.runtime.sendMessage({ action: 'fill_status', status: 'reset' });
-
-    logEntries = [];
-    logContainer.innerHTML = '';
-
-    setButtonsDisabled(true);
-    triggerFill(card, {}); // empty address = card only
-  });
-
-  // ─── Core helpers ─────────────────────────────────────────
-
-  /** Build card from inputs, returns null on error */
-  function buildCard() {
-    const bin = binInput.value.trim();
-    if (!bin) { addLog('error', '✗', 'BIN is required.'); return null; }
+  function buildCardPayload() {
+    const bin = el.binInput.value.trim();
+    if (!bin) { addLog('error', '✗', 'BIN required'); return null; }
     try {
       return CardGenerator.generateFullCard(bin, {
-        month: monthInput.value.trim() || null,
-        year: yearInput.value.trim() || null,
-        cvv: cvvInput.value.trim() || null,
+        month: el.monthInput.value.trim() || null,
+        year: el.yearInput.value.trim() || null,
+        cvv: el.cvvInput.value.trim() || null,
         cardType: selectedType || undefined
       });
     } catch (e) {
@@ -254,249 +239,186 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /**
-   * Build address payload.
-   * If settings has all key fields → use settings.
-   * Otherwise → pick random Korean address from DataGenerator.
-   */
-  function buildAddress(includeAddress) {
-    if (!includeAddress) return {};
-
-    const hasSettings =
-      settings.defaultName &&
-      settings.defaultState &&
-      settings.defaultCity &&
-      settings.defaultAddress1 &&
-      settings.defaultPostal;
-
-    if (hasSettings) {
+  function buildAddressPayload() {
+    const s = appSettings;
+    const hasManual = s.defaultName && s.defaultState && s.defaultCity && s.defaultAddress1 && s.defaultPostal;
+    if (hasManual) {
       return {
-        name: settings.defaultName,
-        state: settings.defaultState,
-        city: settings.defaultCity,
-        line1: settings.defaultAddress1,
-        line2: settings.defaultAddress2 || '',
-        postal: settings.defaultPostal,
-        _isRandom: false
+        name: s.defaultName, state: s.defaultState, city: s.defaultCity,
+        line1: s.defaultAddress1, line2: s.defaultAddress2 || '',
+        postal: s.defaultPostal, _isRandom: false
       };
     }
-
-    // Fall back to random address based on selected country
-    const rand = window.DataGenerator.getRandomAddress(settings.defaultCountry || 'KR');
-    return { ...rand, _isRandom: true };
+    return { ...window.DataGenerator.getRandomAddress(s.defaultCountry || 'KR'), _isRandom: true };
   }
 
-  function triggerFill(card, address) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs[0]) {
-        addLog('error', '✗', 'No active tab found.');
-        setButtonsDisabled(false);
-        return;
-      }
+  // --- UI State Management ---
 
-      const payload = {
-        action: 'fillForm',
-        cardData: card,
-        address: address,
-        fillDelay: settings.fillDelay
-      };
-
-      sendFillMessage(tabs[0].id, payload, (response, errorMessage) => {
-        setButtonsDisabled(false);
-
-        if (errorMessage) {
-          addLog('error', '✗', `Tab error: ${errorMessage}`);
-          return;
-        }
-
-        if (response && response.success) {
-          // Note: Detailed logs and final success string are now broadcasted live 
-          // from the content script to maintain perfect sequence.
-          chrome.storage.local.set({
-            lastFilled: {
-              number: card.number, type: card.type,
-              expiry: card.expiry.formatted, cvv: card.cvv,
-              at: new Date().toLocaleString()
-            }
-          });
-        } else {
-          addLog('error', '✗', response?.error || 'Fill failed. Is this a checkout page?');
-        }
-      });
-    });
-  }
-
-  function setButtonsDisabled(disabled) {
-    fillFullBtn.disabled = disabled;
-    fillCardBtn.disabled = disabled;
-    if (disabled) {
-      fillFullBtn.textContent = 'Filling...';
-      fillCardBtn.textContent = 'Filling...';
+  function toggleScreen(screen) {
+    if (screen === 'settings') {
+      populateSettingsUI();
+      el.mainScreen.style.display = 'none';
+      el.settingsScreen.style.display = 'flex';
     } else {
-      fillFullBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M7 15h2M12 15h5" stroke-linecap="round"/></svg> Fill Full`;
-      fillCardBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Fill Card`;
+      el.settingsScreen.style.display = 'none';
+      el.mainScreen.style.display = 'flex';
     }
   }
 
-  // ─── Network UI ───────────────────────────────────────────
-  function applyNetworkUI(typeKey) {
-    if (!typeKey) { updateBadge('AUTO', '#30363d'); return; }
+  function setLoading(loading) {
+    el.fillFullBtn.disabled = loading;
+    el.fillCardBtn.disabled = loading;
+    el.fillFullBtn.textContent = loading ? 'Filling...' : 'Fill Full';
+    el.fillCardBtn.textContent = loading ? 'Filling...' : 'Fill Card';
+  }
+
+  function updateNetworkUI(typeKey) {
+    if (!typeKey) {
+      el.binTypeBadge.textContent = 'AUTO';
+      el.binTypeBadge.style.background = '#30363d';
+      return;
+    }
     const info = CardGenerator.CARD_TYPES[typeKey];
-    if (!info) return;
-    updateBadge(info.shortName, info.color);
-  }
-
-  function updateBadge(text, color) {
-    binTypeBadge.textContent = text;
-    binTypeBadge.style.background = color;
-  }
-
-  // ─── Settings Helpers ─────────────────────────────────────
-
-  function populateSettingsUI() {
-    s_bin.value = settings.defaultBin || '';
-    s_cardType.value = settings.defaultCardType || '';
-    s_month.value = settings.defaultMonth || '';
-    s_year.value = settings.defaultYear || '';
-    s_cvv.value = settings.defaultCvv || '';
-    s_country.value = settings.defaultCountry || 'KR';
-    s_name.value = settings.defaultName || '';
-    s_state.value = settings.defaultState || '';
-    s_addr1.value = settings.defaultAddress1 || '';
-    s_addr2.value = settings.defaultAddress2 || '';
-    s_city.value = settings.defaultCity || '';
-    s_postal.value = settings.defaultPostal || '';
-    s_delay.value = settings.fillDelay || 100;
-  }
-
-  function applySettingsToMainForm() {
-    if (settings.defaultBin) {
-      binInput.value = settings.defaultBin;
-      binInput.dispatchEvent(new Event('input'));
-    }
-    if (settings.defaultMonth) monthInput.value = settings.defaultMonth;
-    if (settings.defaultYear) yearInput.value = settings.defaultYear;
-    if (settings.defaultCvv) cvvInput.value = settings.defaultCvv;
-    if (settings.defaultCardType) {
-      selectedType = settings.defaultCardType;
-      typeBtns.forEach(b => b.classList.toggle('active', b.dataset.type === selectedType));
-      applyNetworkUI(selectedType);
-    }
-    if (settings.defaultCountry) {
-      updateCountryUI(settings.defaultCountry);
+    if (info) {
+      el.binTypeBadge.textContent = info.shortName;
+      el.binTypeBadge.style.background = info.color;
     }
   }
 
-  // ─── Log (with persistence) ───────────────────────────────
-  let logEntries = [];
+  function updateCountryUI(code) {
+    // Country is now managed only in Settings dropdown
+    if (el.settings.country) el.settings.country.value = code;
+  }
 
   function addLog(type, icon, msg) {
-    const empty = logContainer.querySelector('.log-empty');
+    const empty = el.logContainer.querySelector('.log-empty');
     if (empty) empty.remove();
+    
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
     entry.innerHTML = `<span class="log-icon">${icon}</span><span class="log-text">${escapeHtml(msg)}</span>`;
-    logContainer.appendChild(entry);
-    logContainer.scrollTop = logContainer.scrollHeight;
-    logEntries.push({ type, icon, msg });
-    chrome.storage.local.set({ afLog: logEntries });
-  }
-
-  function renderLog(entries) {
-    logContainer.innerHTML = '';
-    if (!entries || entries.length === 0) {
-      logContainer.innerHTML = '<div class="log-empty">Waiting for fill action...</div>';
-      return;
-    }
-    entries.forEach(e => {
-      const el = document.createElement('div');
-      el.className = `log-entry ${e.type}`;
-      el.innerHTML = `<span class="log-icon">${e.icon}</span><span class="log-text">${escapeHtml(e.msg)}</span>`;
-      logContainer.appendChild(el);
-    });
-    logContainer.scrollTop = logContainer.scrollHeight;
-  }
-
-  function escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  // Listen for logs from content scripts (multi-frame)
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === 'log_step') {
-      addLog(msg.type, msg.icon, msg.msg);
-    }
-  });
-
-  function sendFillMessage(tabId, payload, done, retried = false) {
-    chrome.tabs.sendMessage(tabId, payload, (response) => {
-      const lastError = chrome.runtime.lastError;
-      const errorMessage = lastError ? lastError.message : '';
-
-      if (!lastError) { done(response, ''); return; }
-
-      if (!retried && /Receiving end does not exist/i.test(errorMessage)) {
-        addLog('warn', '↻', 'Content script missing. Injecting and retrying...');
-        injectContentScripts(tabId, (injectError) => {
-          if (injectError) { done(null, injectError); return; }
-          window.setTimeout(() => { sendFillMessage(tabId, payload, done, true); }, 150);
-        });
-        return;
-      }
-
-      done(response, errorMessage);
+    
+    el.logContainer.appendChild(entry);
+    el.logContainer.scrollTop = el.logContainer.scrollHeight;
+    
+    // Save to storage (limit to last 50)
+    chrome.storage.local.get(['afLog'], res => {
+      const logs = res.afLog || [];
+      logs.push({ type, icon, msg });
+      chrome.storage.local.set({ afLog: logs.slice(-50) });
     });
   }
 
-  function injectContentScripts(tabId, done) {
-    if (!chrome.scripting || !chrome.scripting.executeScript) {
-      done('Content script is not available. Reload the extension and refresh the page.');
-      return;
-    }
-    chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ['cardGenerator.js', 'dataGenerator.js', 'subscribeClicker.js', 'captchaSolver.js', 'content.js']
-    }, () => {
-      const lastError = chrome.runtime.lastError;
-      done(lastError ? lastError.message : '');
+  function clearLogs() {
+    chrome.storage.local.remove('afLog');
+    el.logContainer.innerHTML = '<div class="log-empty">Waiting for fill action...</div>';
+  }
+
+  function reloadTab() {
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (tab) chrome.tabs.reload(tab.id);
     });
   }
 
-  function detectCurrentTab() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs[0]) return;
-      try {
-        const url = tabs[0].url || '';
-        pageUrl.textContent = new URL(url).hostname;
-        const isCheckout = /pay|checkout|billing|payment|order|cart/i.test(url);
-        if (isCheckout) {
-          pageStatus.textContent = 'Checkout page detected';
-          pageStatus.parentElement.style.color = 'var(--success)';
-        } else {
-          pageStatus.textContent = 'Navigate to a checkout page';
-          pageStatus.parentElement.style.color = 'var(--warn)';
-        }
-      } catch (_) { }
+  function toggleAutoCaptcha(e) {
+    chrome.storage.local.set({ standaloneCaptcha: e.target.checked });
+    addLog('info', '🤖', `Captcha ${e.target.checked ? 'ON' : 'OFF'}`);
+  }
+
+  // --- Settings Persistence ---
+
+  function saveSettings() {
+    const s = el.settings;
+    appSettings = {
+      defaultBin: s.bin.value.replace(/\D/g, ''),
+      defaultCardType: s.type.value,
+      defaultMonth: s.month.value.replace(/\D/g, ''),
+      defaultYear: s.year.value.replace(/\D/g, ''),
+      defaultCvv: s.cvv.value.replace(/\D/g, ''),
+      defaultCountry: s.country.value,
+      defaultName: s.name.value.trim(),
+      defaultState: s.state.value.trim(),
+      defaultCity: s.city.value.trim(),
+      defaultAddress1: s.addr1.value.trim(),
+      defaultAddress2: s.addr2.value.trim(),
+      defaultPostal: s.postal.value.trim(),
+      fillDelay: parseInt(s.delay.value) || 100
+    };
+
+    chrome.storage.local.set({ afSettings: appSettings }, () => {
+      updateMainFormFromSettings();
+      el.saveSettingsBtn.textContent = '✓ Saved';
+      setTimeout(() => el.saveSettingsBtn.textContent = '💾 Save Settings', 1500);
     });
   }
 
   function loadSettings() {
-    chrome.storage.local.get(['afSettings', 'afLog', 'standaloneCaptcha'], (res) => {
-      if (res.afSettings) {
-        settings = { ...settings, ...res.afSettings };
-      }
+    chrome.storage.local.get(['afSettings', 'afLog', 'standaloneCaptcha'], res => {
+      if (res.afSettings) appSettings = { ...appSettings, ...res.afSettings };
+      if (el.autoCaptchaToggle) el.autoCaptchaToggle.checked = !!res.standaloneCaptcha;
       
-      globalSettings.standaloneCaptcha = !!res.standaloneCaptcha;
-      
-      if (autoCaptchaToggle) autoCaptchaToggle.checked = globalSettings.standaloneCaptcha;
-
-      applySettingsToMainForm();
-
-      if (res.afLog && res.afLog.length) {
-        logEntries = res.afLog;
-        renderLog(logEntries);
-      }
+      updateMainFormFromSettings();
+      if (res.afLog) renderLogs(res.afLog);
     });
   }
 
+  function populateSettingsUI() {
+    const s = el.settings;
+    const v = appSettings;
+    s.bin.value = v.defaultBin;
+    s.type.value = v.defaultCardType;
+    s.month.value = v.defaultMonth;
+    s.year.value = v.defaultYear;
+    s.cvv.value = v.defaultCvv;
+    s.country.value = v.defaultCountry;
+    s.name.value = v.defaultName;
+    s.state.value = v.defaultState;
+    s.city.value = v.defaultCity;
+    s.addr1.value = v.defaultAddress1;
+    s.addr2.value = v.defaultAddress2;
+    s.postal.value = v.defaultPostal;
+    s.delay.value = v.fillDelay;
+  }
+
+  function updateMainFormFromSettings() {
+    const v = appSettings;
+    if (v.defaultBin) {
+      el.binInput.value = v.defaultBin;
+      el.binInput.dispatchEvent(new Event('input'));
+    }
+    el.monthInput.value = v.defaultMonth;
+    el.yearInput.value = v.defaultYear;
+    el.cvvInput.value = v.defaultCvv;
+    if (v.defaultCardType) selectCardType(v.defaultCardType);
+    updateCountryUI(v.defaultCountry);
+  }
+
+  function renderLogs(logs) {
+    if (!logs.length) return;
+    el.logContainer.innerHTML = '';
+    logs.forEach(l => {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${l.type}`;
+      entry.innerHTML = `<span class="log-icon">${l.icon}</span><span class="log-text">${escapeHtml(l.msg)}</span>`;
+      el.logContainer.appendChild(entry);
+    });
+    el.logContainer.scrollTop = el.logContainer.scrollHeight;
+  }
+
+  function updateTabInfo() {
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab) return;
+      try {
+        const url = new URL(tab.url).hostname;
+        el.pageUrl.textContent = url;
+        const isCheckout = /pay|checkout|billing|payment|order|cart/i.test(tab.url);
+        el.pageStatus.textContent = isCheckout ? 'Checkout detected' : 'Standard page';
+        el.pageStatus.parentElement.style.color = isCheckout ? '#10a37f' : '#8e8ea0';
+      } catch (_) {}
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  }
 });

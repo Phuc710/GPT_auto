@@ -1,135 +1,144 @@
 /**
- * ═════════════════════════════════════════════════════════════
- * Dedicated Subscribe Clicker Service
- * Targets ChatGPT / Stripe Checkout Buttons specifically.
- * ═════════════════════════════════════════════════════════════
+ * Subscribe Clicker — Auto-clicks the payment submit / subscribe button
+ * after form fill completes. Works on ChatGPT + Stripe Checkout.
  */
+'use strict';
 
-(function() {
-  'use strict';
+if (window.__subscribeClickerLoaded) {
+  // Already loaded in this frame — skip
+} else {
+  (() => {
+    window.__subscribeClickerLoaded = true;
 
-  if (window.__subscribeClickerLoaded) return;
-  window.__subscribeClickerLoaded = true;
+    // ── Config ──────────────────────────────────────────────────────
+    const MAX_ATTEMPTS   = 18;
+    const ATTEMPT_DELAY  = 300; // ms between retries
 
-  console.log('[Clicker] Subscribe Clicker Service initialized.');
+    // Subscribe-like button text/aria patterns
+    const SUBSCRIBE_TEXT = ['subscribe', 'sign up', 'confirm payment', 'checkout'];
+    const SUBSCRIBE_STARTS = ['pay ', 'start ', 'try '];
 
-  window.performSubscribe = async function() {
-    if (window.__isSubscribing) {
-       console.log('[Clicker] Already searching for button. Skipping duplicate call.');
-       return false;
+    // ── Expose globally ─────────────────────────────────────────────
+    window.performSubscribe       = performSubscribe;
+    window.triggerSubscribeImmediate = () => performSubscribe();
+
+    // ── Listeners ────────────────────────────────────────────────────
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.action === 'all_fills_complete' && window === window.top) {
+        setTimeout(() => performSubscribe().catch(() => {}), 400);
+      }
+      if (msg.action === 'trigger_subscribe_now' && window === window.top) {
+        setTimeout(() => performSubscribe().catch(() => {}), 300);
+      }
+    });
+
+    // ── Main function ────────────────────────────────────────────────
+    async function performSubscribe() {
+      if (window.__isSubscribing) return false;
+      window.__isSubscribing = true;
+
+      try {
+        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+          const btn = findSubscribeButton();
+
+          if (btn) {
+            await highlightAndClick(btn);
+            broadcastLog('success', '✅', '[Clicker] Subscribe button clicked!');
+            return true;
+          }
+
+          await sleep(ATTEMPT_DELAY);
+        }
+
+        broadcastLog('error', '❌', '[Clicker] Subscribe button not found');
+        return false;
+      } finally {
+        window.__isSubscribing = false;
+      }
     }
-    window.__isSubscribing = true;
-    
-    const MAX_TRIES = 15;
-    const INTERVAL = 400;
 
-    console.log('[Clicker] Starting 🚀 Auto Subscribe scan...');
-
-    for (let i = 0; i < MAX_TRIES; i++) {
-        // ... find candidates ...
+    // ── Button detection ─────────────────────────────────────────────
+    function findSubscribeButton() {
       const candidates = [
-        ...document.querySelectorAll('button[aria-label*="Subscribe" i]'),
-        ...document.querySelectorAll('.btn-primary.w-full.p-4.text-base'),
-        ...document.querySelectorAll('button[type="submit"][form*="_r_"]'),
-        ...document.querySelectorAll('[data-testid*="subscribe" i]'),
+        ...document.querySelectorAll('button[aria-label="Subscribe"]'),
+        ...document.querySelectorAll('button[type="submit"]'),
+        ...document.querySelectorAll('[data-testid*="submit" i]'),
         ...document.querySelectorAll('[data-testid*="payment-submit" i]'),
-        ...document.querySelectorAll('button')
+        ...document.querySelectorAll('button[aria-label*="subscribe" i]')
       ];
 
-      let targetBtn = null;
-
       for (const btn of candidates) {
-        if (!btn) continue;
-
-        const text = (btn.textContent || '').trim().toLowerCase();
-        const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-        
-        // Stricter matching to be safer but include "Try", "Start", "Pay"
-        const isExplicitMatch = 
-          text === 'subscribe' || text.includes('subscribe') || 
-          text === 'pay $20.00' || text === 'confirm payment' || 
-          text.startsWith('pay ') || text.startsWith('start ') ||
-          text.startsWith('try ') || text === 'proceed' ||
-          text.includes('checkout') || text.includes('continue to payment');
-
-        if (!isExplicitMatch && !ariaLabel.includes('subscribe') && !ariaLabel.includes('payment')) continue;
-
-        const style = window.getComputedStyle(btn);
-        const rect = btn.getBoundingClientRect();
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || rect.width < 50) continue;
-
-        const isDisabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.classList.contains('disabled');
-        if (!isDisabled) {
-           targetBtn = btn;
-           break; 
-        }
+        if (!isSubscribeCandidate(btn)) continue;
+        if (!isClickable(btn))         continue;
+        return btn;
       }
-
-      if (targetBtn) {
-        const humanDelay = Math.floor(Math.random() * 500) + 100;
-        console.log(`[Clicker] 🚀 Button found! Clicking in ${humanDelay}ms...`);
-        
-        // Visual feedback: Flash the button so the user sees it
-        const oldOutline = targetBtn.style.outline;
-        const oldTransition = targetBtn.style.transition;
-        targetBtn.style.transition = 'none';
-        targetBtn.style.outline = '4px solid #ff4d4d'; // Red flash
-        targetBtn.style.boxShadow = '0 0 15px #ff4d4d';
-        
-        await new Promise(r => setTimeout(r, humanDelay));
-        
-        // Clear flash
-        targetBtn.style.outline = oldOutline;
-        targetBtn.style.boxShadow = 'none';
-        targetBtn.style.transition = oldTransition;
-
-        await simulateHumanClick(targetBtn);
-        
-        if (chrome.runtime?.id) {
-          try {
-            chrome.runtime.sendMessage({ action: 'log_step', type: 'success', icon: '🚀', msg: '[Clicker] Auto-clicked Subscribe 1 time!' }).catch(() => {});
-          } catch(e) {}
-        }
-        
-        window.__isSubscribing = false;
-        return true;
-      }
-      
-      await new Promise(r => setTimeout(r, INTERVAL));
+      return null;
     }
-    
-    window.__isSubscribing = false;
-    console.log('[Clicker] ⏳ Could not find target button in this frame.');
-    return false;
-  };
 
-  async function simulateHumanClick(el) {
-    if (!el) return;
-    
-    // 1. Di chuột tới và Focus (như người đang chuẩn bị bấm)
-    const rect = el.getBoundingClientRect();
-    const mouseParams = { bubbles: true, cancelable: true, view: window, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
-    
-    el.dispatchEvent(new MouseEvent('mouseover', mouseParams));
-    el.dispatchEvent(new MouseEvent('mouseenter', mouseParams));
-    el.focus();
-    
-    // Chờ một chút ngắn (phản xạ người)
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 50) + 50));
+    function isSubscribeCandidate(btn) {
+      const text  = (btn.textContent || '').trim().toLowerCase();
+      const aria  = (btn.getAttribute('aria-label') || '').toLowerCase();
+      const combined = text + ' ' + aria;
 
-    // 2. Thực hiện chuỗi Click
-    el.dispatchEvent(new PointerEvent('pointerdown', mouseParams));
-    el.dispatchEvent(new MouseEvent('mousedown', mouseParams));
-    
-    // Giữ chuột xuống khoảng 80-150ms như người thật
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 70) + 80));
-    
-    el.dispatchEvent(new PointerEvent('pointerup', mouseParams));
-    el.dispatchEvent(new MouseEvent('mouseup', mouseParams));
-    el.dispatchEvent(new MouseEvent('click', mouseParams));
+      return (
+        SUBSCRIBE_TEXT.some(t => combined.includes(t)) ||
+        SUBSCRIBE_STARTS.some(t => combined.startsWith(t)) ||
+        // ChatGPT-specific pattern
+        (btn.classList.contains('btn-primary') && aria.includes('subscribe'))
+      );
+    }
 
-    // Backup click cuối cùng để chắc chắn
-    setTimeout(() => { try { el.click(); } catch(e){} }, 20);
-  }
+    function isClickable(btn) {
+      const style = window.getComputedStyle(btn);
+      const rect  = btn.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      if (rect.width < 40 || rect.height < 16) return false;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return false;
+      return true;
+    }
 
-})();
+    // ── Click simulation ─────────────────────────────────────────────
+    async function highlightAndClick(btn) {
+      // Brief visual flash
+      const prevOutline = btn.style.outline;
+      btn.style.outline = '2px solid #10a37f';
+      btn.style.boxShadow = '0 0 10px #10a37f80';
+      await sleep(rand(150, 350));
+      btn.style.outline   = prevOutline;
+      btn.style.boxShadow = '';
+
+      // Human click sequence
+      const rect = btn.getBoundingClientRect();
+      const cx   = rect.left + rect.width  / 2;
+      const cy   = rect.top  + rect.height / 2;
+      const mOpts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy };
+
+      btn.dispatchEvent(new MouseEvent('mouseover',  mOpts));
+      btn.focus();
+      await sleep(rand(40, 80));
+
+      btn.dispatchEvent(new PointerEvent('pointerdown', mOpts));
+      btn.dispatchEvent(new MouseEvent('mousedown',   mOpts));
+      await sleep(rand(90, 160));
+
+      btn.dispatchEvent(new PointerEvent('pointerup', mOpts));
+      btn.dispatchEvent(new MouseEvent('mouseup',     mOpts));
+      btn.dispatchEvent(new MouseEvent('click',       mOpts));
+
+      // Backup native click
+      await sleep(25);
+      try { btn.click(); } catch (_) {}
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+    function broadcastLog(type, icon, msg) {
+      console.log(`[Clicker] ${icon} ${msg}`);
+      if (chrome.runtime?.id) {
+        chrome.runtime.sendMessage({ action: 'log_step', type, icon, msg }).catch(() => {});
+      }
+    }
+
+    function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+    function sleep(ms)      { return new Promise(r => setTimeout(r, ms)); }
+  })();
+}

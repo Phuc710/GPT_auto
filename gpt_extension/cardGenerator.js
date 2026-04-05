@@ -80,7 +80,7 @@ const CARD_TYPES = {
     cvvLength: 3,
     color: '#003087',
     gradient: 'linear-gradient(135deg, #003087, #009f6b)',
-    emoji: '🇯🇵',
+    emoji: '💳',
     mask: '#### #### #### ####'
   },
   DINERS: {
@@ -313,7 +313,12 @@ function resolveCardLength(binStr, overrideLength, cardType) {
     }
     return l;
   }
-  return cardType ? cardType.lengths[0] : 16;
+  
+  if (!cardType) return 16;
+  
+  // Prefer standard length (16 for most cards), fallback to first length
+  if (cardType.lengths.includes(16)) return 16;
+  return cardType.lengths[0];
 }
 
 /**
@@ -336,7 +341,7 @@ function generateCardFromBIN(bin, length = null, cardTypeOverride = '') {
 
   const cardLength = resolveCardLength(binStr, length, cardType);
 
-  if (binStr.length >= cardLength) {
+  if (binStr.length > cardLength) {
     throw new Error(`BIN (${binStr.length} digits) too long for card length ${cardLength}`);
   }
 

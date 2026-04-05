@@ -88,7 +88,9 @@ async function handleGenerateCard(request) {
 }
 
 // ─── Fill Coordinator (Cross-frame sync) ──────────────────────
-let activeFillCounts = {}; // tabId -> count
+// Tracks how many frames are actively filling. When all finish,
+// sends 'phase_done' so popup can move to the next step.
+let activeFillCounts = {};
 
 function handleFillStatus(request, sender) {
   const tabId = sender.tab?.id;
@@ -103,19 +105,18 @@ function handleFillStatus(request, sender) {
 
   if (request.status === 'started') {
     activeFillCounts[tabId]++;
-    console.log(`[Coordinator] Tab ${tabId}: Frame started filling. Total active: ${activeFillCounts[tabId]}`);
   } else if (request.status === 'finished') {
     activeFillCounts[tabId] = Math.max(0, activeFillCounts[tabId] - 1);
-    console.log(`[Coordinator] Tab ${tabId}: Frame finished. Remaining: ${activeFillCounts[tabId]}`);
 
     if (activeFillCounts[tabId] === 0) {
-      // Small debounce to ensure no other frames are mid-start
-      setTimeout(() => {
-        if (activeFillCounts[tabId] === 0) {
-          console.log(`[Coordinator] Tab ${tabId}: All frames finished! Triggering subscribe...`);
-          chrome.tabs.sendMessage(tabId, { action: 'all_fills_complete' }).catch(() => {});
-        }
-      }, 150);
+      chrome.storage.local.get(['afSettings'], (res) => {
+        const delay = res.afSettings?.fillDelay || 100;
+        setTimeout(() => {
+          if (activeFillCounts[tabId] === 0) {
+            chrome.runtime.sendMessage({ action: 'phase_done' }).catch(() => {});
+          }
+        }, delay);
+      });
     }
   }
 }
